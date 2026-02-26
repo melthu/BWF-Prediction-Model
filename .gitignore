@@ -5,7 +5,5 @@ __pycache__/
 # Virtual environment
 .venv/
 
-# Generated data outputs (reproducible via scraper_orchestrator.py)
-raw_matches.csv
-*.csv
-!tournaments_config.csv
+# Data files tracked in git
+# (all CSVs under data/ are committed; no blanket exclusion)

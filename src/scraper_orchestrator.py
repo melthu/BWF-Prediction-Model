@@ -4,8 +4,8 @@ import pandas as pd
 
 from scraper_wiki_single import scrape_wiki_single
 
-CONFIG_PATH = "tournaments_config.csv"
-OUTPUT_PATH = "raw_matches.csv"
+CONFIG_PATH = "data/config/tournaments_config.csv"
+OUTPUT_PATH = "data/raw/raw_matches.csv"
 
 
 def run_orchestrator(config_path: str = CONFIG_PATH, output_path: str = OUTPUT_PATH) -> pd.DataFrame:
@@ -29,6 +29,7 @@ def run_orchestrator(config_path: str = CONFIG_PATH, output_path: str = OUTPUT_P
             continue
 
         df.insert(3, "start_date", row["start_date"])
+        df.insert(4, "host_country", row["host_country"])
         all_frames.append(df)
         print(f"  OK: {len(df)} matches extracted.\n")
 
