@@ -24,6 +24,38 @@ bwfML/
 └── CLAUDE.md
 ```
 
+
+# Spec: `src/dataset.py` (PyTorch Dataset & Preprocessing)
+
+## 1. Context & Objective
+Create a custom `torch.utils.data.Dataset` class named `BWFDataset` to prepare the `final_training_data.csv` for a PyTorch DeepFM model. The script must handle categorical encoding, continuous feature scaling, and tensor conversion.
+
+## 2. Feature Grouping
+Separate the 14 input columns into Categorical and Continuous groups:
+* **Categorical Features (4):** `tier`, `round`, `player_a`, `player_b`
+* **Continuous Features (10):** `same_nationality`, `h2h_win_rate_a_vs_b`, `player_a_is_home`, `player_a_matches_last_14_days`, `player_a_days_since_last_match`, `player_a_recent_win_rate`, `player_b_is_home`, `player_b_matches_last_14_days`, `player_b_days_since_last_match`, `player_b_recent_win_rate`
+* **Target (1):** `player_a_won`
+
+## 3. The "Shared Vocabulary" Rule
+You must create a single, unified mapping dictionary for all player names. 
+* Combine all unique names from both the `player_a` and `player_b` columns to create a master `player_to_id` dictionary. 
+* Map both `player_a` and `player_b` columns using this identical dictionary so the model learns a single embedding per player.
+
+## 4. Preprocessing Logic
+1.  **Categorical Encoding:** Map `tier` and `round` to integer indices (0 to N-1) using simple dictionaries or `sklearn.preprocessing.LabelEncoder`.
+2.  **Continuous Scaling:** Use `sklearn.preprocessing.StandardScaler` (or `MinMaxScaler`) on the 10 continuous columns to ensure stable neural network gradients.
+3.  **Store Mappings:** The class should save the vocabulary sizes (e.g., `num_players`, `num_tiers`, `num_rounds`) as attributes so the DeepFM model knows exactly how large to build its embedding tables later.
+
+## 5. `__getitem__` Output
+For a given index, the dataset must return a tuple of three PyTorch Tensors:
+1.  `cat_features`: LongTensor of shape `(4,)` containing the categorical indices.
+2.  `cont_features`: FloatTensor of shape `(10,)` containing the scaled continuous values.
+3.  `label`: FloatTensor of shape `(1,)` containing the target (`player_a_won`).
+
+## 6. Execution Request
+Write the script. At the bottom, under an `if __name__ == '__main__':` block, initialize the dataset, print the vocabulary sizes (how many unique players, tiers, and rounds exist), and print the exact tensor output of `dataset[0]` to verify the shapes and scaling.
+
+
 All scripts are run from the **project root** (`bwfML/`) so relative paths like
 `data/raw/raw_matches.csv` resolve correctly.
 

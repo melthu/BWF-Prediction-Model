@@ -64,7 +64,7 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
         ranges = []
         for cell in rows[0].find_all(["th", "td"]):
             cs = int(cell.get("colspan", 1))
-            text = cell.get_text().strip()
+            text = cell.get_text().strip().lower()
             if text:
                 ranges.append((col, col + cs - 1, text))
             col += cs
@@ -167,7 +167,7 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
             continue
         if table_type == "group_match":
             for _, name, nationality, is_winner in extract_player_cells(table):
-                all_players.append(("Group stage", name, nationality, is_winner))
+                all_players.append(("group stage", name, nationality, is_winner))
         else:
             round_ranges = build_round_ranges(table)
             for col_idx, name, nationality, is_winner in extract_player_cells(table):
