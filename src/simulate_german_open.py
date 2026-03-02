@@ -137,11 +137,11 @@ def _predict_one_direction(
     pa, pb, round_name, player_stats,
     h2h_rate_fn, h2h_last_fn,
     scaler, player_to_id, tier_to_id, round_to_id,
-    model_payload,
+    model_payload, tier=None,
 ):
     """Raw model call with pa in the player_a slot (20-feature vector)."""
     UNK      = 0
-    tier_id  = tier_to_id.get(TIER, 0)
+    tier_id  = tier_to_id.get(TIER if tier is None else tier, 0)
     round_id = round_to_id.get(round_name, 0)
     pa_id    = player_to_id.get(pa, UNK)
     pb_id    = player_to_id.get(pb, UNK)
@@ -185,7 +185,7 @@ def predict_match(
     pa, pb, round_name, player_stats,
     h2h_rate_fn, h2h_last_fn,
     scaler, player_to_id, tier_to_id, round_to_id,
-    model_payload,
+    model_payload, tier=None,
 ):
     """
     Order-invariant win probability for pa beating pb.
@@ -194,12 +194,12 @@ def predict_match(
     p_ab = _predict_one_direction(
         pa, pb, round_name, player_stats,
         h2h_rate_fn, h2h_last_fn,
-        scaler, player_to_id, tier_to_id, round_to_id, model_payload,
+        scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
     )
     p_ba = _predict_one_direction(
         pb, pa, round_name, player_stats,
         h2h_rate_fn, h2h_last_fn,
-        scaler, player_to_id, tier_to_id, round_to_id, model_payload,
+        scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
     )
     return (p_ab + (1.0 - p_ba)) / 2.0
 
@@ -208,7 +208,7 @@ def simulate_bracket(
     r32_matchups, player_stats,
     h2h_rate_fn, h2h_last_fn,
     scaler, player_to_id, tier_to_id, round_to_id,
-    model_payload, rng,
+    model_payload, rng, tier=None,
 ):
     """Run one full bracket simulation. Returns the champion name."""
     current_round_players = [
@@ -222,7 +222,7 @@ def simulate_bracket(
             p_a_wins = predict_match(
                 pa, pb, round_name, player_stats,
                 h2h_rate_fn, h2h_last_fn,
-                scaler, player_to_id, tier_to_id, round_to_id, model_payload,
+                scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
             )
             winner = pa if rng.random() < p_a_wins else pb
             next_round.append(winner)
