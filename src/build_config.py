@@ -10,6 +10,7 @@ MIN_TIER = 100  # Keep Super 100 and above; drop everything else
 
 HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
 
+# BWF World Tour (2018-present)
 LEVEL_MAP = {
     "World Tour Finals": 1500,
     "Super 1000":        1000,
@@ -17,6 +18,15 @@ LEVEL_MAP = {
     "Super 500":          500,
     "Super 300":          300,
     "Super 100":          100,
+}
+
+# BWF Super Series / Super Series Premier (2011-2017)
+SUPERSERIES_LEVEL_MAP = {
+    "Super Series Premier": 750,
+    "Super Series":         500,
+    # Some pages label them without "Super" prefix
+    "Series Premier":       750,
+    "Series":               500,
 }
 
 MONTH_MAP = {
@@ -45,13 +55,13 @@ def parse_start_date(date_text: str, year: int) -> str | None:
     return None
 
 
-def get_tier(cell) -> int | None:
+def get_tier(cell, level_map: dict = LEVEL_MAP) -> int | None:
     """Read tier from '<li><b>Level:</b> Super 1000</li>' inside the tournament cell."""
     for li in cell.find_all("li"):
         b = li.find("b")
         if b and "level" in b.get_text().lower():
             text = re.sub(r"Level\s*:\s*", "", li.get_text(), flags=re.IGNORECASE).strip()
-            for label, value in LEVEL_MAP.items():
+            for label, value in level_map.items():
                 if label.lower() in text.lower():
                     return value
     return None
@@ -112,8 +122,12 @@ def get_tournament_name(cell, year: int) -> str | None:
     return None
 
 
-def scrape_year(year: int) -> list[dict]:
-    url = f"https://en.wikipedia.org/wiki/{year}_BWF_World_Tour"
+def _scrape_calendar_page(url: str, year: int, level_map: dict) -> list[dict]:
+    """
+    Core scraping logic for any BWF calendar page.
+    Finds tournament cells containing '<li><b>Level:</b>…</li>' and extracts
+    tier, draw URL, tournament name, host country, and start date.
+    """
     try:
         resp = requests.get(url, headers=HEADERS, timeout=15)
         if resp.status_code == 404:
@@ -128,13 +142,11 @@ def scrape_year(year: int) -> list[dict]:
     tournaments = []
     seen_urls: set[str] = set()
 
-    # Each tournament block has exactly one <td> containing '<li><b>Level:</b> ...>'
-    # That cell also holds the Draw link, host info, and sits in the same <tr> as the date cell.
     for cell in soup.find_all("td"):
         if "Level" not in cell.get_text():
             continue
 
-        tier = get_tier(cell)
+        tier = get_tier(cell, level_map)
         if tier is None or tier < MIN_TIER:
             continue
 
@@ -147,8 +159,6 @@ def scrape_year(year: int) -> list[dict]:
         if not tournament_name or not host_country:
             continue
 
-        # Date lives in the first <td> of the same <tr> (both use rowspan, so they
-        # share the anchor row in the HTML even though they span many visual rows).
         parent_tr  = cell.find_parent("tr")
         start_date = None
         if parent_tr:
@@ -172,9 +182,34 @@ def scrape_year(year: int) -> list[dict]:
     return tournaments
 
 
+def scrape_year(year: int) -> list[dict]:
+    """Scrape a BWF World Tour calendar page (2018+)."""
+    return _scrape_calendar_page(
+        f"https://en.wikipedia.org/wiki/{year}_BWF_World_Tour",
+        year, LEVEL_MAP,
+    )
+
+
+def scrape_superseries_year(year: int) -> list[dict]:
+    """Scrape a BWF Super Series calendar page (2011-2017)."""
+    return _scrape_calendar_page(
+        f"https://en.wikipedia.org/wiki/{year}_BWF_Super_Series",
+        year, SUPERSERIES_LEVEL_MAP,
+    )
+
+
 def build_config(output_path: str = OUTPUT_PATH) -> pd.DataFrame:
     all_rows = []
-    for year in range(2021, 2027):  # 2021 – 2026
+
+    # BWF Super Series era: 2010–2017
+    for year in range(2010, 2018):
+        print(f"Scraping {year} BWF Super Series...")
+        rows = scrape_superseries_year(year)
+        all_rows.extend(rows)
+        time.sleep(2)
+
+    # BWF World Tour era: 2018–2026
+    for year in range(2018, 2027):
         print(f"Scraping {year} BWF World Tour...")
         rows = scrape_year(year)
         all_rows.extend(rows)

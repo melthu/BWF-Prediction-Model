@@ -29,6 +29,11 @@ CONT_COLS = [
     "player_b_win_streak",
     "player_a_matches_last_7_days",
     "player_b_matches_last_7_days",
+    # Score-derived 4
+    "player_a_avg_point_diff",
+    "player_b_avg_point_diff",
+    "player_a_avg_games_per_match",
+    "player_b_avg_games_per_match",
 ]
 
 UNK_ID = 0  # reserved for players not seen during training

@@ -16,6 +16,9 @@ SWAP_PAIRS = [
     ("player_a_ema_form",                 "player_b_ema_form"),
     ("player_a_win_streak",               "player_b_win_streak"),
     ("player_a_matches_last_7_days",      "player_b_matches_last_7_days"),
+    # Score-derived features
+    ("player_a_avg_point_diff",           "player_b_avg_point_diff"),
+    ("player_a_avg_games_per_match",      "player_b_avg_games_per_match"),
 ]
 
 
@@ -31,10 +34,11 @@ def load_and_mirror(input_path: str = INPUT_PATH, output_path: str = OUTPUT_PATH
         mirrored_df[col_a], mirrored_df[col_b] = df[col_b].copy(), df[col_a].copy()
 
     # Invert the target, H2H rate, and new directional features
-    mirrored_df["player_a_won"]        = 1 - mirrored_df["player_a_won"]
-    mirrored_df["h2h_win_rate_a_vs_b"] = 1.0 - mirrored_df["h2h_win_rate_a_vs_b"]
-    mirrored_df["elo_diff"]            = -mirrored_df["elo_diff"]
-    mirrored_df["h2h_last_winner"]     = 1.0 - mirrored_df["h2h_last_winner"]
+    mirrored_df["player_a_won"]              = 1 - mirrored_df["player_a_won"]
+    mirrored_df["h2h_win_rate_a_vs_b"]       = 1.0 - mirrored_df["h2h_win_rate_a_vs_b"]
+    mirrored_df["elo_diff"]                  = -mirrored_df["elo_diff"]
+    mirrored_df["h2h_last_winner"]           = 1.0 - mirrored_df["h2h_last_winner"]
+    mirrored_df["player_a_avg_point_diff"]   = -mirrored_df["player_a_avg_point_diff"]
 
     final = pd.concat([df, mirrored_df], ignore_index=True)
     final.to_csv(output_path, index=False)

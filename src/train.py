@@ -10,14 +10,14 @@ from sklearn.metrics import roc_auc_score
 from src.dataset import get_train_val_datasets
 from src.model import BWFDeepFM
 
-DATA_PATH   = "data/processed/final_training_data.csv"
-MODEL_PATH  = "models/best_deepfm.pt"
+DATA_PATH    = "data/processed/final_training_data.csv"
+MODEL_PATH   = "models/best_deepfm.pt"
 
-BATCH_SIZE  = 64
-LR          = 1e-3
-WEIGHT_DECAY = 1e-5
-MAX_EPOCHS  = 20
-PATIENCE    = 3
+BATCH_SIZE   = 64
+LR           = 5e-4
+WEIGHT_DECAY = 1e-4
+MAX_EPOCHS   = 50
+PATIENCE     = 5
 
 
 def train():
@@ -32,19 +32,28 @@ def train():
     print(f"Vocab sizes: {vocab_sizes}\n")
 
     # ------------------------------------------------------------------
-    # Model, loss, optimiser
+    # Model, loss, optimiser, scheduler
     # ------------------------------------------------------------------
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Device: {device}\n")
 
-    model = BWFDeepFM(vocab_sizes=vocab_sizes).to(device)
+    model = BWFDeepFM(
+        vocab_sizes=vocab_sizes,
+        embed_dim=32,
+        num_cont_features=24,
+        hidden_dims=[256, 128, 64],
+    ).to(device)
     criterion = nn.BCEWithLogitsLoss()
     optimiser = torch.optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimiser, T_max=MAX_EPOCHS, eta_min=1e-5
+    )
 
     # ------------------------------------------------------------------
     # Training loop with early stopping
     # ------------------------------------------------------------------
     best_val_loss = float("inf")
+    best_val_auc  = 0.0
     epochs_no_improve = 0
 
     print(f"{'Epoch':>5} | {'Train Loss':>10} | {'Val Loss':>8} | {'Val Acc':>7} | {'Val AUC':>7}")
@@ -64,6 +73,7 @@ def train():
             optimiser.step()
             train_loss += loss.item() * len(labels)
         train_loss /= len(train_ds)
+        scheduler.step()
 
         # --- Validate ---
         model.eval()
@@ -78,7 +88,7 @@ def train():
                 all_labels.append(labels.cpu())
         val_loss /= len(val_ds)
 
-        all_probs  = torch.cat(all_logits).numpy().ravel()
+        all_probs     = torch.cat(all_logits).numpy().ravel()
         all_labels_np = torch.cat(all_labels).numpy().ravel()
 
         val_acc = ((all_probs >= 0.5) == all_labels_np).mean()
@@ -89,8 +99,14 @@ def train():
         # --- Early stopping & checkpoint ---
         if val_loss < best_val_loss:
             best_val_loss = val_loss
+            best_val_auc  = val_auc
             epochs_no_improve = 0
-            torch.save(model.state_dict(), MODEL_PATH)
+            # Save full checkpoint including vocab_sizes (needed for ensemble loading)
+            torch.save({
+                "model_state_dict": model.state_dict(),
+                "vocab_sizes":      vocab_sizes,
+                "val_auc":          val_auc,
+            }, MODEL_PATH)
         else:
             epochs_no_improve += 1
             if epochs_no_improve >= PATIENCE:
@@ -98,6 +114,7 @@ def train():
                 break
 
     print(f"\nBest val loss : {best_val_loss:.4f}")
+    print(f"Best val AUC  : {best_val_auc:.4f}")
     print(f"Model saved to: {MODEL_PATH}")
 
 

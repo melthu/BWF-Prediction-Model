@@ -62,7 +62,7 @@ def build_time_zero_state(df, tour_date=None, tier=None):
             keep.append(row)
     r32_unique = pd.DataFrame(keep).reset_index(drop=True)
 
-    # Build player_stats dict with all 20 CONT_COLS fields
+    # Build player_stats dict with all 24 CONT_COLS fields
     player_stats = {}
     for _, row in r32_unique.iterrows():
         for side in ("a", "b"):
@@ -77,6 +77,9 @@ def build_time_zero_state(df, tour_date=None, tier=None):
                     "ema_form":        float(row[f"player_{side}_ema_form"]),
                     "win_streak":      int(row[f"player_{side}_win_streak"]),
                     "matches_7d":      int(row[f"player_{side}_matches_last_7_days"]),
+                    # New score-derived features
+                    "avg_point_diff":  float(row.get(f"player_{side}_avg_point_diff", 0.0)),
+                    "avg_games_pm":    float(row.get(f"player_{side}_avg_games_per_match", 2.0)),
                 }
 
     return r32_unique, player_stats
@@ -149,7 +152,7 @@ def _predict_one_direction(
     sa = player_stats[pa]
     sb = player_stats[pb]
 
-    # 20 features in CONT_COLS order
+    # 24 features in CONT_COLS order
     cont_raw = np.array([[
         # Original 10
         0.0,                                # same_nationality
@@ -162,7 +165,7 @@ def _predict_one_direction(
         float(sb["matches_14d"]),           # player_b_matches_last_14_days
         float(sb["days_since"]),            # player_b_days_since_last_match
         float(sb["recent_win_rate"]),       # player_b_recent_win_rate
-        # New 10
+        # New 10 (Elo/EMA/streak/H2H)
         float(sa["elo"]),                   # player_a_elo
         float(sb["elo"]),                   # player_b_elo
         float(sa["elo"] - sb["elo"]),       # elo_diff
@@ -173,6 +176,11 @@ def _predict_one_direction(
         float(sb["win_streak"]),            # player_b_win_streak
         float(sa["matches_7d"]),            # player_a_matches_last_7_days
         float(sb["matches_7d"]),            # player_b_matches_last_7_days
+        # Score-derived 4
+        float(sa["avg_point_diff"]),        # player_a_avg_point_diff
+        float(sb["avg_point_diff"]),        # player_b_avg_point_diff
+        float(sa["avg_games_pm"]),          # player_a_avg_games_per_match
+        float(sb["avg_games_pm"]),          # player_b_avg_games_per_match
     ]], dtype=np.float32)
 
     cont_scaled = scaler.transform(cont_raw)

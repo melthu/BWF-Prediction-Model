@@ -4,6 +4,9 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 
+# Matches score strings like "21-15", "21–14, 18–21, 21–16" (en-dashes or hyphens)
+SCORE_RE = re.compile(r"(\d+\s*[–\-]\s*\d+(?:[,\s]+\d+\s*[–\-]\s*\d+)*)")
+
 
 def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFrame:
     """
@@ -32,7 +35,8 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
             ms_heading_div = div
             break
 
-    EMPTY_COLS = ["tournament", "tier", "round", "player_a", "player_a_nat", "player_b", "player_b_nat", "player_a_won"]
+    EMPTY_COLS = ["tournament", "tier", "round", "player_a", "player_a_nat",
+                  "player_b", "player_b_nat", "player_a_won", "score"]
 
     if ms_heading_div is None:
         print("ERROR: Could not find a 'Men's Singles' section header on this page.")
@@ -153,7 +157,11 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
                         # Strip Wikipedia parenthetical disambiguations e.g. "(badminton)"
                         name = re.sub(r"\s*\(.*?\)", "", name).strip()
                         if name:
-                            result.append((col_idx, name, nationality, is_winner))
+                            # Extract score text from this cell (winner's cell usually has it)
+                            cell_text = cell.get_text(separator=" ")
+                            score_m = SCORE_RE.search(cell_text)
+                            score = re.sub(r"\s+", " ", score_m.group(1)).strip() if score_m else ""
+                            result.append((col_idx, name, nationality, is_winner, score))
 
                 col_idx += cs
 
@@ -166,24 +174,31 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
         if table_type == "skip":
             continue
         if table_type == "group_match":
-            for _, name, nationality, is_winner in extract_player_cells(table):
-                all_players.append(("group stage", name, nationality, is_winner))
+            for _, name, nationality, is_winner, score in extract_player_cells(table):
+                all_players.append(("group stage", name, nationality, is_winner, score))
         else:
             round_ranges = build_round_ranges(table)
-            for col_idx, name, nationality, is_winner in extract_player_cells(table):
+            for col_idx, name, nationality, is_winner, score in extract_player_cells(table):
                 round_name = col_to_round(col_idx, round_ranges)
-                all_players.append((round_name, name, nationality, is_winner))
+                all_players.append((round_name, name, nationality, is_winner, score))
 
     matches = []
     for i in range(0, len(all_players) - 1, 2):
-        round_a, player_a, nat_a, a_wins = all_players[i]
-        round_b, player_b, nat_b, _ = all_players[i + 1]
+        round_a, player_a, nat_a, a_wins, score_a = all_players[i]
+        round_b, player_b, nat_b, _, score_b = all_players[i + 1]
 
         # Both players in a pair share the same round; prefer the non-Unknown one
         round_name = round_a if round_a != "Unknown" else round_b
 
         if player_a == player_b:
             continue
+
+        # Score is always stored from the winner's perspective (winner pts first).
+        # Prefer the winner's cell score; fall back to whichever cell has text.
+        if a_wins:
+            match_score = score_a or score_b
+        else:
+            match_score = score_b or score_a
 
         matches.append(
             {
@@ -195,6 +210,7 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
                 "player_b": player_b,
                 "player_b_nat": nat_b,
                 "player_a_won": 1 if a_wins else 0,
+                "score": match_score,
             }
         )
 
