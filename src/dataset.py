@@ -63,6 +63,7 @@ def get_train_val_datasets(csv_path: str = DATA_PATH):
         train_dataset : BWFDataset
         val_dataset   : BWFDataset
         vocab_sizes   : dict with num_players, num_tiers, num_rounds
+        preprocessors : dict with scaler, player_to_id, tier_to_id, round_to_id
     """
     df = pd.read_csv(csv_path)
     df["start_date"] = pd.to_datetime(df["start_date"])
@@ -123,11 +124,18 @@ def get_train_val_datasets(csv_path: str = DATA_PATH):
     train_dataset = BWFDataset(train_cat, train_cont, train_labels)
     val_dataset   = BWFDataset(val_cat,   val_cont,   val_labels)
 
-    return train_dataset, val_dataset, vocab_sizes
+    preprocessors = {
+        "scaler":       scaler,
+        "player_to_id": player_to_id,
+        "tier_to_id":   tier_to_id,
+        "round_to_id":  round_to_id,
+    }
+
+    return train_dataset, val_dataset, vocab_sizes, preprocessors
 
 
 if __name__ == "__main__":
-    train_ds, val_ds, vocab_sizes = get_train_val_datasets()
+    train_ds, val_ds, vocab_sizes, _ = get_train_val_datasets()
 
     print("=== Split Sizes ===")
     print(f"  Train rows : {len(train_ds)}")

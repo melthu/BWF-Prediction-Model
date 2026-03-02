@@ -24,7 +24,7 @@ def train():
     # ------------------------------------------------------------------
     # Data
     # ------------------------------------------------------------------
-    train_ds, val_ds, vocab_sizes = get_train_val_datasets(DATA_PATH)
+    train_ds, val_ds, vocab_sizes, _ = get_train_val_datasets(DATA_PATH)
     train_loader = DataLoader(train_ds, batch_size=BATCH_SIZE, shuffle=True)
     val_loader   = DataLoader(val_ds,   batch_size=BATCH_SIZE, shuffle=False)
 

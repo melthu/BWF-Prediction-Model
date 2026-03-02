@@ -27,7 +27,7 @@ def train():
     # ------------------------------------------------------------------
     # Data — identical split/scaling/vocab as DeepFM and LightGBM runs
     # ------------------------------------------------------------------
-    train_ds, val_ds, vocab_sizes = get_train_val_datasets(DATA_PATH)
+    train_ds, val_ds, vocab_sizes, _ = get_train_val_datasets(DATA_PATH)
 
     print(f"Train size : {len(train_ds)}  |  Val size : {len(val_ds)}")
     print(f"Vocab sizes: {vocab_sizes}\n")

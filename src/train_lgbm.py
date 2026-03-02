@@ -2,6 +2,8 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import pickle
+
 import numpy as np
 import lightgbm as lgb
 from sklearn.metrics import roc_auc_score
@@ -9,8 +11,9 @@ from torch.utils.data import DataLoader
 
 from src.dataset import get_train_val_datasets
 
-DATA_PATH  = "data/processed/final_training_data.csv"
-DEEPFM_AUC = 0.7011   # DeepFM baseline (epoch 7, best val loss)
+DATA_PATH   = "data/processed/final_training_data.csv"
+MODEL_PATH  = "models/best_lgbm.pkl"
+DEEPFM_AUC  = 0.7011   # DeepFM baseline (epoch 7, best val loss)
 
 
 def extract_numpy(dataset):
@@ -29,7 +32,7 @@ def train():
     # ------------------------------------------------------------------
     # Data — identical split/scaling/vocab as the DeepFM run
     # ------------------------------------------------------------------
-    train_ds, val_ds, vocab_sizes = get_train_val_datasets(DATA_PATH)
+    train_ds, val_ds, vocab_sizes, _ = get_train_val_datasets(DATA_PATH)
 
     print(f"Train size : {len(train_ds)}  |  Val size : {len(val_ds)}")
     print(f"Vocab sizes: {vocab_sizes}\n")
@@ -63,6 +66,10 @@ def train():
 
     val_acc = (val_preds == y_val).mean()
     val_auc = roc_auc_score(y_val, val_probs)
+
+    with open(MODEL_PATH, "wb") as f:
+        pickle.dump(model, f)
+    print(f"Model saved to: {MODEL_PATH}\n")
 
     print(f"\n{'='*40}")
     print(f"  LightGBM Results")
