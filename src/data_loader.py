@@ -3,7 +3,7 @@ import pandas as pd
 INPUT_PATH = "data/interim/engineered_matches.csv"
 OUTPUT_PATH = "data/processed/final_training_data.csv"
 
-METADATA_COLS = ["tournament", "start_date", "host_country", "player_a_nat", "player_b_nat"]
+METADATA_COLS = ["tournament", "host_country", "player_a_nat", "player_b_nat"]
 
 SWAP_PAIRS = [
     ("player_a",                       "player_b"),

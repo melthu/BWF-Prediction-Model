@@ -24,36 +24,65 @@ bwfML/
 └── CLAUDE.md
 ```
 
-
-# Spec: `src/dataset.py` (PyTorch Dataset & Preprocessing)
+# Spec: `src/model.py` (DeepFM Architecture)
 
 ## 1. Context & Objective
-Create a custom `torch.utils.data.Dataset` class named `BWFDataset` to prepare the `final_training_data.csv` for a PyTorch DeepFM model. The script must handle categorical encoding, continuous feature scaling, and tensor conversion.
+Build a Deep Factorization Machine (DeepFM) in PyTorch to predict `player_a_won`. The model will process categorical indices via embeddings and continuous features via a standard feed-forward network.
 
-## 2. Feature Grouping
-Separate the 14 input columns into Categorical and Continuous groups:
-* **Categorical Features (4):** `tier`, `round`, `player_a`, `player_b`
-* **Continuous Features (10):** `same_nationality`, `h2h_win_rate_a_vs_b`, `player_a_is_home`, `player_a_matches_last_14_days`, `player_a_days_since_last_match`, `player_a_recent_win_rate`, `player_b_is_home`, `player_b_matches_last_14_days`, `player_b_days_since_last_match`, `player_b_recent_win_rate`
-* **Target (1):** `player_a_won`
+## 2. Model Architecture
+Create a class `BWFDeepFM(nn.Module)`:
+* **Inputs**: `vocab_sizes` (dict of the 4 categorical sizes), `embed_dim` (default 16), `num_cont_features` (default 10), `hidden_dims` (default `[64, 32]`).
+* **Embeddings**: Create `nn.Embedding` tables for `tier`, `round`, `player_a`, and `player_b`. All must have the same `embed_dim`.
+* **FM Component**: Compute the 2nd-order pairwise interactions between the 4 categorical embeddings using the Factorization Machine formula.
+* **Deep Component**: 
+  1. Flatten and concatenate the 4 categorical embeddings.
+  2. Concatenate that result with the `cont_features`.
+  3. Pass the combined tensor through an MLP defined by `hidden_dims`, using ReLU activations and `nn.Dropout(p=0.2)`.
+* **Output**: A final linear layer combining the FM output and the Deep output. Do NOT apply a Sigmoid at the end. Return the raw logits (we will use `BCEWithLogitsLoss` for numerical stability).
 
-## 3. The "Shared Vocabulary" Rule
-You must create a single, unified mapping dictionary for all player names. 
-* Combine all unique names from both the `player_a` and `player_b` columns to create a master `player_to_id` dictionary. 
-* Map both `player_a` and `player_b` columns using this identical dictionary so the model learns a single embedding per player.
+---
 
-## 4. Preprocessing Logic
-1.  **Categorical Encoding:** Map `tier` and `round` to integer indices (0 to N-1) using simple dictionaries or `sklearn.preprocessing.LabelEncoder`.
-2.  **Continuous Scaling:** Use `sklearn.preprocessing.StandardScaler` (or `MinMaxScaler`) on the 10 continuous columns to ensure stable neural network gradients.
-3.  **Store Mappings:** The class should save the vocabulary sizes (e.g., `num_players`, `num_tiers`, `num_rounds`) as attributes so the DeepFM model knows exactly how large to build its embedding tables later.
+# Spec: `src/train.py` (The Training Loop)
 
-## 5. `__getitem__` Output
-For a given index, the dataset must return a tuple of three PyTorch Tensors:
-1.  `cat_features`: LongTensor of shape `(4,)` containing the categorical indices.
-2.  `cont_features`: FloatTensor of shape `(10,)` containing the scaled continuous values.
-3.  `label`: FloatTensor of shape `(1,)` containing the target (`player_a_won`).
+## 1. Context & Objective
+Train the `BWFDeepFM` model using the chronologically split datasets. Implement Early Stopping to prevent overfitting. Evaluate performance using Accuracy and ROC-AUC.
 
-## 6. Execution Request
-Write the script. At the bottom, under an `if __name__ == '__main__':` block, initialize the dataset, print the vocabulary sizes (how many unique players, tiers, and rounds exist), and print the exact tensor output of `dataset[0]` to verify the shapes and scaling.
+## 2. Implementation Logic
+1. Call `get_train_val_datasets('data/processed/final_training_data.csv')` from `src.dataset`.
+2. Initialize `DataLoader` for both train and val splits (batch size = 64).
+3. Initialize `BWFDeepFM`, `nn.BCEWithLogitsLoss()`, and `torch.optim.Adam` (lr=0.001, weight_decay=1e-5).
+4. **The Loop**: Train for up to 20 epochs. 
+5. **Evaluation**: At the end of each epoch, calculate Validation Loss, Validation Accuracy, and Validation ROC-AUC (using `sklearn.metrics.roc_auc_score` after applying a sigmoid to the logits).
+6. **Early Stopping**: Track the Validation Loss. If it does not improve for 3 consecutive epochs, halt training and print "Early stopping triggered".
+7. Save the model weights with the best Validation Loss to `models/best_deepfm.pt`.
+
+
+
+# Spec: `src/data_loader.py` (Dataset Mirroring Update)
+Update the existing script to **KEEP** the `start_date` column in the final output. Do not drop it. We need it for chronological splitting in PyTorch. 
+
+# Spec: `src/dataset.py` (Stateful PyTorch Preprocessing)
+
+## 1. Context & Objective
+Read the single `final_training_data.csv`, split it chronologically (Train = 2021-2025, Val = 2026+), and apply strict "Fit on Train, Transform on Val" preprocessing to avoid data leakage. Handle unknown future players gracefully.
+
+## 2. Implementation Logic
+Create a helper function `get_train_val_datasets(csv_path)` that does the following:
+1. Load the CSV. Convert `start_date` to datetime.
+2. **Chronological Split:** `train_df` is all rows where year <= 2025. `val_df` is all rows where year >= 2026.
+3. **The Shared Player Dictionary (with UNK):** * Extract all unique player names from `player_a` and `player_b` *only in train_df*.
+   * Assign ID `0` to `<UNK>` (Unknown Player). Assign IDs `1` to `N` for the training players.
+4. **Stateful Scaling:**
+   * Initialize a `StandardScaler` for the 10 continuous features.
+   * `fit()` the scaler ONLY on `train_df`.
+5. **Transforming the Data:**
+   * Apply the scaler to both `train_df` and `val_df`.
+   * Map `player_a` and `player_b` to their IDs. If a player in `val_df` is not in the dictionary (a 2026 rookie), assign them ID `0` (`<UNK>`).
+   * Map `tier` and `round` to integer indices.
+6. Return a tuple: `(train_dataset, val_dataset, vocab_sizes)` where the datasets are instances of a `BWFDataset` class (which simply returns the `cat_features`, `cont_features`, and `label` tensors for a given index, ignoring the `start_date`).
+
+## 3. Execution Request
+Rewrite `src/dataset.py` with this logic. Under `if __name__ == "__main__":`, call the function, and print the lengths of the Train and Val datasets, and the vocabulary size of the players (including the `<UNK>` token).
 
 
 All scripts are run from the **project root** (`bwfML/`) so relative paths like
