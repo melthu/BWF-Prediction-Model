@@ -16,3 +16,4 @@ beautifulsoup4
 streamlit
 shap
 matplotlib
+plotly

@@ -40,6 +40,33 @@ bwfML/
 
 ---
 
+# Spec: `app.py` (Phase 5: The "Live Terminal" UI Revamp)
+
+## 1. Context & Objective
+Transform the Streamlit app into a live, interactive Point-in-Time trading terminal. It must feature a chronological tournament selector with a mini-calendar, live simulation progress rendering, a most-likely bracket visualizer, and a deep-dive Matchup Analyzer.
+
+## 2. UI Layout & Temporal Navigation
+1. **Sidebar - The Timeline:**
+   * Display the "Current Date" clearly.
+   * **Mini-Calendar Selector:** Implement `st.date_input` to render a mini-calendar.
+   * **Dynamic Dropdown:** When a user picks a date on the calendar, filter the tournament dropdown to show tournaments happening in that specific month/year.
+   * Format the tournament options to show: Date, Host Country Flag, Tier, and Tournament Name (e.g., "📅 2026-03-03 | 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Super 1000 All England Open").
+   * Visually group them as [PAST] or [UPCOMING] relative to today.
+   * Add a slider for `N_SIMULATIONS`.
+
+## 3. The Live Engine (Tab 1)
+1. **Point-in-Time Training:** Show live steps with `st.status()` when training the model strictly on data before the selected date.
+2. **Live Ticker Effect:** Update the leaderboard placeholder every 500 simulations to show probabilities converging.
+3. **Most Likely Bracket:** Render a visual tree of the "Expected Bracket".
+
+## 4. Matchup Analyzer (Tab 2)
+1. Dropdowns to pick Player A and Player B.
+2. **Radar Chart:** Compare stats (Elo, Form, Streak, Fatigue) using Plotly.
+3. **SHAP Waterfall:** Explain the XGBoost prediction for this exact matchup.
+
+## 5. Flag Dictionaries
+1. Implement `PLAYER_NATIONS` and `TOURNAMENT_HOSTS` for UI emojis.
+
 # Spec: `app.py` (UI Upgrade: National Flags)
 
 ## 1. Context & Objective
