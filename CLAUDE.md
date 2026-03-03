@@ -1,370 +1,104 @@
-# Project: BWF Men's Singles Match Prediction
+# BWF Men's Singles Match Prediction — Project Reference
+
+All scripts run from the **project root** (`bwfML/`). Relative paths like `data/raw/raw_matches.csv` resolve correctly from there.
+
+---
 
 ## Directory Structure
+
 ```
 bwfML/
-├── run_pipeline.py               # Master runner — executes all 4 ETL steps end-to-end
-├── src/                          # All Python source files
-│   ├── __init__.py
-│   ├── build_config.py           # Step 1 — scrapes BWF calendar pages (2021–2026)
-│   ├── scraper_wiki_single.py    # Step 2a — single-tournament Wikipedia scraper
-│   ├── scraper_orchestrator.py   # Step 2b — loops config and calls scraper_wiki_single
-│   ├── feature_engineering.py   # Step 3 — computes rolling temporal features
-│   └── data_loader.py            # Step 4 — mirrors dataset for ML symmetry
+├── run_pipeline.py              # Master CLI: --scrape --features --train --tune --all
+├── app.py                       # Streamlit dashboard (Monte Carlo + SHAP)
+├── Makefile
+├── requirements.txt
+├── src/
+│   ├── build_config.py          # Step 1 — BWF calendar scraper (2010-2026)
+│   ├── scraper_wiki_single.py   # Step 2a — single-tournament Wikipedia scraper
+│   ├── scraper_orchestrator.py  # Step 2b — orchestrates all tournaments
+│   ├── feature_engineering.py  # Step 3 — temporal feature engineering (30 features)
+│   ├── data_loader.py           # Step 4 — dataset mirroring for positional symmetry
+│   ├── dataset.py               # PyTorch dataset, extract_numpy, preprocessing
+│   ├── model.py                 # BWFDeepFM (PyTorch)
+│   ├── train.py                 # DeepFM training loop (standalone, not in pipeline)
+│   ├── train_lgbm.py            # LightGBM trainer
+│   ├── train_catboost.py        # CatBoost trainer
+│   ├── train_xgb.py             # XGBoost trainer
+│   ├── train_ensemble.py        # Ensemble selection + DeepFMWrapper
+│   ├── temporal_cv.py           # Rolling 3-fold temporal cross-validation
+│   ├── tune_hyperparams.py      # Optuna search for XGBoost + LightGBM
+│   └── simulate_german_open.py  # Monte Carlo tournament simulation
 ├── data/
-│   ├── config/
-│   │   └── tournaments_config.csv   # 143 tournaments: url, name, tier, start_date, host_country
-│   ├── raw/
-│   │   └── raw_matches.csv          # 4,305 match results with player names, nationalities, round
-│   ├── interim/
-│   │   └── engineered_matches.csv   # 4,305 rows + 11 engineered features (H2H, form, fatigue)
-│   └── processed/
-│       └── final_training_data.csv  # 8,610 rows — original + mirrored, metadata dropped, ML-ready
-├── models/                       # Trained model artefacts (future)
-└── CLAUDE.md
+│   ├── config/tournaments_config.csv   # 241 tournaments 2010-2026 (tracked)
+│   ├── raw/raw_matches.csv             # 9,255 match results (tracked)
+│   ├── interim/                        # engineered features (git-ignored)
+│   └── processed/                      # ML-ready mirrored dataset (git-ignored)
+└── models/
+    ├── best_params.json     # Optuna best hyperparameters (tracked)
+    └── *.pkl / *.pt         # trained artifacts (git-ignored, run make train)
 ```
 
-# BWF Quantitative Model: Phase 4 - Deep History & Neural Challenger
+---
 
-## Phase 4.1: Deep Data (2010 - 2026)
-1. **Scraper Update:** Modify the scraper to pull matches from Jan 1, 2010. 
-2. **Granular Stats:** Capture game scores (e.g., 21-15) and calculate 'Point Differential' and 'Total Points (Fatigue)' features.
+## Pipeline
 
-## Phase 4.2: The Neural Challenger (DeepFM / TabNet)
-1. **Model Implementation:** Use PyTorch to implement a DeepFM or TabNet model.
-2. **Comparison:** Benchmark the neural network against the XGBoost champion on the full 2010-2026 dataset.
-3. **SHAP Integration:** Use `shap.Explainer` (Kernel or Deep explainer) to interpret the neural network's decisions if it becomes the new champion.
-
-## Phase 4.3: Analytical Dashboard
-1. **SHAP Waterfall:** Add a "Match Analysis" tab to `app.py` showing feature contributions.
-2. **Win Probability Distribution:** Show how the probability shifted over the player's last 5 matches.
-
-
-# Spec: `app.py` (Phase 3.5: SHAP Interpretability)
-
-## 1. Context & Objective
-Upgrade the Streamlit dashboard to include a "Matchup Explainer" tab using the `shap` library. This will allow the user to select any two players from the bracket and visualize the exact feature contributions for that specific matchup.
-
-## 2. Implementation Logic
-1. **Dependencies**: Ensure `shap` and `matplotlib` are imported. Streamlit sometimes requires a wrapper like `st.pyplot()` to render SHAP plots.
-2. **UI Update**: Wrap the main dashboard into two tabs: `st.tabs(["Monte Carlo Bracket", "Matchup Explainer"])`.
-3. **The Explainer Tab**:
-   * Create two selectboxes for the user to choose `Player A` and `Player B` from the current tournament's roster.
-   * Add a "Analyze Matchup" button.
-4. **SHAP Integration**:
-   * When the button is clicked, build the exact 20-feature input array for that matchup using the `build_time_zero_state` logic.
-   * Initialize a SHAP explainer for the saved XGBoost model: `explainer = shap.TreeExplainer(model)`.
-   * Calculate the SHAP values for that specific 1D feature array: `shap_values = explainer(feature_array)`.
-   * Generate a `shap.plots.waterfall(shap_values[0])` to visually show how the base expected value was pushed up or down by specific features (Elo, fatigue, form, etc.).
-   * Render the matplotlib figure in Streamlit using `st.pyplot()`.
-
-# BWF Quantitative Prediction Model Autonomous Upgrade Plan
-
-## Phase 1: Feature Engineering & Model Search (Max Alpha)
-**Objective:** Autonomously upgrade the feature engineering pipeline and test multiple model architectures to maximize the out-of-time ROC-AUC. 
-**Strict Guardrail:** You must process all time-series features chronologically. Never let future data leak into past matches.
-1. **Baseline Upgrades:** Implement a running Elo system (default 1500, K-factor scaled by tier), an Exponential Moving Average for player form, and a binary flag for H2H momentum.
-2. **Autonomous Feature Engineering:** You have full permission to invent and implement any additional features you believe will improve the model. Think about fatigue, travel, giant-killer stats, or matchup styles.
-3. **Autonomous Model Selection:** Do not restrict yourself to LightGBM. Test CatBoost, XGBoost, or deep learning models like TabNet. Retain the model and hyperparameter combination that achieves the highest validation AUC on the 2026 split.
-
-## Phase 2: Pipeline Organization (Terminal Architecture)
-**Objective:** Refactor the repository execution for a clean terminal-based development environment.
-1. **Master CLI:** Update `run_pipeline.py` using `argparse` to accept flags like `--scrape`, `--features`, `--train`, and `--all`.
-2. **Makefile:** Create a `Makefile` in the root directory with standard commands (e.g., `make data`, `make train`, `make dashboard`).
-
-## Phase 3: The Inference Dashboard
-**Objective:** Build a Streamlit interface to visualize the Monte Carlo simulations.
-1. **Create `app.py`:** Write a Streamlit application in the root directory.
-2. **Functionality:** Include a sidebar to select a mock tournament bracket and a "Run Simulation" button. The main view must display a clean leaderboard dataframe of the Monte Carlo Championship Probabilities generated by the winning model.
-
-
-# Spec: `src/simulate_german_open.py` (Real-World Inference)
-
-## 1. Context & Objective
-Run a 10,000-iteration Monte Carlo simulation of the 2026 German Open using the trained LightGBM model (`models/best_lgbm.pkl`). Dynamically extract the starting 32-player bracket and their "Time Zero" (Day 1) stats directly from the CSV.
-
-## 2. Implementation Logic
-1. **Data Loading & Time Zero State**:
-   * Load `data/processed/final_training_data.csv`. Ensure `start_date` is parsed.
-   * Filter the dataframe for the 2026 German Open (Tier = 300, Date = '2026-02-24').
-   * Isolate the First Round matches. Drop the mirrored duplicates so you are left with exactly 16 unique matchups. This is your chronological starting bracket.
-   * Create a `player_stats` dictionary. For all 32 players, extract their `is_home`, `matches_last_14_days`, `days_since_last_match`, and `recent_win_rate` exactly as they appeared in those First Round rows.
-2. **Preprocessing State**:
-   * You MUST apply the exact same categorical mappings and continuous scaling that LightGBM trained on. Import `get_train_val_datasets` from `src.dataset` just to retrieve the fitted `StandardScaler` and the `player_to_id` mappings from the Training set.
-3. **The Matchup Engine**:
-   * Create a helper function `predict_match(player_a, player_b, round_name)`:
-     * Pulls the static "Time Zero" continuous stats from the `player_stats` dict.
-     * Calculates historical H2H by checking the pre-2026 training data (if they never played, default to 0.5).
-     * Formats these 14 features into a 2D NumPy array, applying the `StandardScaler` to the continuous columns and the ID mappings to the categorical columns.
-     * Passes the array to `lgbm_model.predict_proba()` to get the probability of Player A winning.
-4. **The Monte Carlo Loop (10,000 iterations)**:
-   * **R32**: Simulate the 16 exact matchups extracted from the CSV. Winners advance.
-   * **R16 -> QF -> SF -> Final**: Pair adjacent winners, update the `round_name`, call `predict_match()`, and roll a random float against the probability to determine who advances.
-5. **Output**:
-   * Print the 16 actual First Round matchups so we can verify the bracket is correct.
-   * Print the final Championship Probability Leaderboard for the 10,000 iterations (Player Name | Win %).
-
-
-# Spec: `src/train_xgb.py` (XGBoost Benchmark)
-
-## 1. Context & Objective
-Train an XGBoost classifier to benchmark against LightGBM and DeepFM. Use the exact same chronologically split, scaled, and shared-vocabulary dataset to ensure a fair comparison.
-
-## 2. Implementation Logic
-1. **Data Extraction**:
-   * Import `get_train_val_datasets` from `src.dataset`.
-   * Load `train_ds` and `val_ds` from `data/processed/final_training_data.csv`.
-   * Iterate through the datasets to extract the tensors and convert them into standard NumPy arrays (`X_train`, `y_train`, `X_val`, `y_val`). 
-   * Concatenate the categorical (`cat_features`) and continuous (`cont_features`) arrays horizontally to create the `X` matrices.
-2. **Model Training**:
-   * Initialize `xgboost.XGBClassifier(n_estimators=1000, learning_rate=0.05, random_state=42, early_stopping_rounds=50, eval_metric='auc')`. *(Note: modern XGBoost requires `early_stopping_rounds` in the constructor or the fit method depending on the version. Adapt as needed for the installed version).*
-   * Call `fit()`.
-   * Pass `eval_set=[(X_val, y_val)]` and `verbose=False` to keep the console clean.
-3. **Evaluation**:
-   * Predict the probabilities on `X_val` using `predict_proba()[:, 1]`.
-   * Calculate and print the Validation Accuracy and Validation ROC-AUC.
-   * Compare the results to the DeepFM (~0.7011 AUC) and LightGBM (~0.7330 AUC) baselines.
-
-# Spec: `src/train_lgbm.py` (LightGBM Baseline)
-
-## 1. Context & Objective
-Train a LightGBM classifier to benchmark against the DeepFM model. Use the exact same chronologically split, scaled, and shared-vocabulary dataset to ensure a 1:1 comparison.
-
-## 2. Implementation Logic
-1. **Data Extraction**:
-   * Import `get_train_val_datasets` from `src.dataset`.
-   * Load `train_ds` and `val_ds` from `data/processed/final_training_data.csv`.
-   * Iterate through the datasets to extract the tensors and convert them into standard NumPy arrays (`X_train`, `y_train`, `X_val`, `y_val`). 
-   * Concatenate the categorical (`cat_features`) and continuous (`cont_features`) arrays horizontally to create the `X` matrices.
-2. **Model Training**:
-   * Initialize `lightgbm.LGBMClassifier(n_estimators=1000, learning_rate=0.05, random_state=42)`.
-   * Call `fit()`.
-   * Pass `eval_set=[(X_val, y_val)]`.
-   * Define `categorical_feature=[0, 1, 2, 3]` (since the first 4 columns are tier, round, player_a, player_b).
-   * Use the native LightGBM early stopping callback: `callbacks=[lightgbm.early_stopping(stopping_rounds=50)]`.
-3. **Evaluation**:
-   * Predict the probabilities on `X_val`.
-   * Calculate and print the Validation Accuracy and Validation ROC-AUC.
-   * Compare the results in a print statement to the DeepFM baseline (which achieved ~0.7011 AUC).
-
-
-# Spec: `src/model.py` (DeepFM Architecture)
-
-## 1. Context & Objective
-Build a Deep Factorization Machine (DeepFM) in PyTorch to predict `player_a_won`. The model will process categorical indices via embeddings and continuous features via a standard feed-forward network.
-
-## 2. Model Architecture
-Create a class `BWFDeepFM(nn.Module)`:
-* **Inputs**: `vocab_sizes` (dict of the 4 categorical sizes), `embed_dim` (default 16), `num_cont_features` (default 10), `hidden_dims` (default `[64, 32]`).
-* **Embeddings**: Create `nn.Embedding` tables for `tier`, `round`, `player_a`, and `player_b`. All must have the same `embed_dim`.
-* **FM Component**: Compute the 2nd-order pairwise interactions between the 4 categorical embeddings using the Factorization Machine formula.
-* **Deep Component**: 
-  1. Flatten and concatenate the 4 categorical embeddings.
-  2. Concatenate that result with the `cont_features`.
-  3. Pass the combined tensor through an MLP defined by `hidden_dims`, using ReLU activations and `nn.Dropout(p=0.2)`.
-* **Output**: A final linear layer combining the FM output and the Deep output. Do NOT apply a Sigmoid at the end. Return the raw logits (we will use `BCEWithLogitsLoss` for numerical stability).
+| Step | Script | Output |
+|------|--------|--------|
+| 1 | `build_config.py` | `data/config/tournaments_config.csv` — 241 tournaments |
+| 2 | `scraper_orchestrator.py` | `data/raw/raw_matches.csv` — 9,255 matches with scores, seeds, walkovers |
+| 3 | `feature_engineering.py` | `data/interim/engineered_matches.csv` — 30 temporal features, walkovers filtered |
+| 4 | `data_loader.py` | `data/processed/final_training_data.csv` — 18,118 rows (mirrored) |
 
 ---
 
-# Spec: `src/train.py` (The Training Loop)
+## Features
 
-## 1. Context & Objective
-Train the `BWFDeepFM` model using the chronologically split datasets. Implement Early Stopping to prevent overfitting. Evaluate performance using Accuracy and ROC-AUC.
+**4 categorical:** tier, round, player\_a ID, player\_b ID
 
-## 2. Implementation Logic
-1. Call `get_train_val_datasets('data/processed/final_training_data.csv')` from `src.dataset`.
-2. Initialize `DataLoader` for both train and val splits (batch size = 64).
-3. Initialize `BWFDeepFM`, `nn.BCEWithLogitsLoss()`, and `torch.optim.Adam` (lr=0.001, weight_decay=1e-5).
-4. **The Loop**: Train for up to 20 epochs. 
-5. **Evaluation**: At the end of each epoch, calculate Validation Loss, Validation Accuracy, and Validation ROC-AUC (using `sklearn.metrics.roc_auc_score` after applying a sigmoid to the logits).
-6. **Early Stopping**: Track the Validation Loss. If it does not improve for 3 consecutive epochs, halt training and print "Early stopping triggered".
-7. Save the model weights with the best Validation Loss to `models/best_deepfm.pt`.
+**30 continuous (`CONT_COLS` in `dataset.py`):**
+- *Original (10):* same\_nationality, h2h\_win\_rate, home flags ×2, 14d matches ×2, days\_since ×2, 180d win\_rate ×2
+- *Elo / EMA (10):* player\_a/b Elo, elo\_diff, player\_a/b EMA form, h2h\_last\_winner, win\_streak ×2, matches\_7d ×2
+- *Score-derived (4):* avg\_point\_diff ×2, avg\_games\_per\_match ×2 (rolling 10 matches)
+- *Phase 5 (6):* rubber\_game\_rate ×2, avg\_victory\_margin ×2, seed ×2
 
-
-
-# Spec: `src/data_loader.py` (Dataset Mirroring Update)
-Update the existing script to **KEEP** the `start_date` column in the final output. Do not drop it. We need it for chronological splitting in PyTorch. 
-
-# Spec: `src/dataset.py` (Stateful PyTorch Preprocessing)
-
-## 1. Context & Objective
-Read the single `final_training_data.csv`, split it chronologically (Train = 2021-2025, Val = 2026+), and apply strict "Fit on Train, Transform on Val" preprocessing to avoid data leakage. Handle unknown future players gracefully.
-
-## 2. Implementation Logic
-Create a helper function `get_train_val_datasets(csv_path)` that does the following:
-1. Load the CSV. Convert `start_date` to datetime.
-2. **Chronological Split:** `train_df` is all rows where year <= 2025. `val_df` is all rows where year >= 2026.
-3. **The Shared Player Dictionary (with UNK):** * Extract all unique player names from `player_a` and `player_b` *only in train_df*.
-   * Assign ID `0` to `<UNK>` (Unknown Player). Assign IDs `1` to `N` for the training players.
-4. **Stateful Scaling:**
-   * Initialize a `StandardScaler` for the 10 continuous features.
-   * `fit()` the scaler ONLY on `train_df`.
-5. **Transforming the Data:**
-   * Apply the scaler to both `train_df` and `val_df`.
-   * Map `player_a` and `player_b` to their IDs. If a player in `val_df` is not in the dictionary (a 2026 rookie), assign them ID `0` (`<UNK>`).
-   * Map `tier` and `round` to integer indices.
-6. Return a tuple: `(train_dataset, val_dataset, vocab_sizes)` where the datasets are instances of a `BWFDataset` class (which simply returns the `cat_features`, `cont_features`, and `label` tensors for a given index, ignoring the `start_date`).
-
-## 3. Execution Request
-Rewrite `src/dataset.py` with this logic. Under `if __name__ == "__main__":`, call the function, and print the lengths of the Train and Val datasets, and the vocabulary size of the players (including the `<UNK>` token).
-
-
-All scripts are run from the **project root** (`bwfML/`) so relative paths like
-`data/raw/raw_matches.csv` resolve correctly.
-
-## Pipeline Overview
-
-The full pipeline is triggered by `python3 run_pipeline.py` and runs these four steps in order:
-
-| Step | Script | Description |
-|------|--------|-------------|
-| 1 | `build_config.py` | Scrapes the Wikipedia BWF World Tour calendar pages for 2021–2026. Finds every Super 100+ tournament by locating `<li><b>Level:</b></li>` cells, extracts the year-specific Draw URL, tier, start date, and host country. Saves 143 tournaments to `data/config/tournaments_config.csv`. |
-| 2a | `scraper_wiki_single.py` | Core Wikipedia scraper for a single tournament. Isolates the Men's Singles section, classifies each table (bracket / group\_match / skip), uses a rowspan/colspan-aware column tracker to map players to rounds, extracts nationality from flagicon links, and determines the winner via bold tag detection. Returns a DataFrame of match pairs with a binary `player_a_won` target. |
-| 2b | `scraper_orchestrator.py` | Macro-scraper that reads `tournaments_config.csv` and calls `scraper_wiki_single` for each tournament. Injects `start_date` and `host_country` into each result, sleeps 2 s between requests, and concatenates everything into `data/raw/raw_matches.csv`. |
-| 3 | `feature_engineering.py` | Transforms raw matches into an ML-ready feature set. For every row, builds a strict historical slice (`start_date < current_date`) to prevent data leakage, then computes: H2H win rate, home advantage flags, matches played in last 14 days, days since last match, and 180-day rolling win rate — for both players. Saves to `data/interim/engineered_matches.csv`. |
-| 4 | `data_loader.py` | Drops text metadata columns, then mirrors every row by swapping all Player A / Player B feature columns and inverting the target (`player_a_won`) and H2H rate. This doubles the dataset to 8,610 rows and enforces positional symmetry so the model cannot learn to favour whichever slot a player happens to be assigned to. Saves to `data/processed/final_training_data.csv`. |
+**Train split:** 2010–2025 (17,784 rows) | **Val split:** 2026+ (334 rows)
 
 ---
 
+## Current Model Results
 
-# Spec: `build_config.py` (BWF Calendar Scraper)
+| Model    | Val AUC |
+|----------|---------|
+| LightGBM | 0.7372  |
+| CatBoost | 0.7821  |
+| XGBoost  | **0.7872** ← best |
+| Ensemble | 0.7768  |
 
-## 1. Context & Objective
-Automate the creation of `data/config/tournaments_config.csv` by scraping the official Wikipedia
-BWF World Tour calendar pages for 2021–2026.
-
-## 2. Scraping Logic
-1. **Target URLs:** Loop `https://en.wikipedia.org/wiki/2021_BWF_World_Tour` → `2026_BWF_World_Tour`.
-2. **Table Parsing:** Each tournament block is a `<td>` that contains `<li><b>Level:</b> …</li>`.
-3. **Extraction per row:**
-   * **Tournament Name & URL:** Bold `<a>` inside the cell (skip flagicon links). Append year to get e.g. "Malaysia Open 2025". Draw URL = `<a>` with text "Draw" pointing to `/wiki/`. Redlinks are skipped.
-   * **Tier:** From `<li><b>Level:</b> Super 1000</li>`. Map Super 100/300/500/750/1000 → int; World Tour Finals → 1500. Filter out anything below Super 100.
-   * **Start Date:** First `<td>` of the same `<tr>` as the tournament cell. Format: "7–12 January" → YYYY-MM-DD.
-   * **Host Country:** From `<li><b>Host:</b> Kuala Lumpur, Malaysia</li>` — take the last comma-separated token.
-
-## 3. Output Schema (`data/config/tournaments_config.csv`)
-`url`, `tournament_name`, `tier`, `start_date`, `host_country`
-
+Best model saved to `models/best_model.pkl` as `{"type": "single", "model": xgb, "name": "xgb"}`.
 
 ---
 
+## Key Rules & Gotchas
 
-# Spec: `scraper_wiki_single.py` (BWF Wikipedia MS Scraper V3)
+**No data leakage:** All temporal features use strict `hist = df[df['start_date'] < current_date]`.
 
-## 1. Context & Objective
-Extract strictly **Men's Singles** match outcomes from a single BWF tournament Wikipedia page.
+**Preprocessing is stateful:** Vocab (player/tier/round IDs) and `StandardScaler` are fit on train only, then applied to val. `fill_missing_cont_cols()` in `dataset.py` fills absent `CONT_COLS` with 0.0 for backward compat.
 
-## 2. Extraction Logic
-**Step 1: Isolate the Men's Singles Section**
-* Find the `<div class="mw-heading mw-heading2">` wrapping an h2/h3 matching "Men's singles".
-* Walk next siblings, collecting `<table>` elements, until the next discipline's mw-heading2 div.
+**`extract_numpy(dataset)`** lives in `src/dataset.py` — import from there; do not re-define locally.
 
-**Step 2: Classify Each Table**
-* `classify_table()` returns `'bracket'`, `'group_match'`, or `'skip'`.
-  * `'group_match'`: headers contain both "Player 1" and "Player 2" → label all matches "Group stage".
-  * `'skip'`: headers contain "Seeds", "Rank", "NOCs", "W", "L", "Pld", "Pts", or "Nation".
-  * `'bracket'`: everything else — use column-position round mapping.
+**`start_date` is kept** in `final_training_data.csv` (needed for chronological split). `data_loader.py` does NOT drop it.
 
-**Step 3: Round Extraction via Column Tracking**
-* `build_round_ranges(table)`: parse first-row headers accounting for colspan → `(start_col, end_col, round_name)`.
-* `extract_player_cells(table)`: rowspan/colspan-aware column tracking via `col_occupancy` dict.
-* `col_to_round(col_idx, ranges)`: maps a player's column index to its round name.
+**CatBoost gotcha:** `np.hstack([cat_int, cont_float])` produces `float64`. CatBoost's `cat_features=` parameter doesn't work on float arrays — leave it off.
 
-**Step 4: Match Pairing, Nationality & Binary Outcome**
-* Players extracted via `<span class="flagicon">` tags.
-* Nationality: `flagicon.find("a").get("title")`, cleaned of "national badminton team" artifacts.
-* Player name: first `<a>` in the cell NOT inside a flagicon AND NOT containing "national badminton team".
-* Winner: `flagicon.parent.name == "b"` → `player_a_won = 1`, else `0`.
-* Players are paired sequentially (DOM order = match order).
+**Order-invariant prediction:** `simulate_german_open.py` averages P(A beats B) as `[P(A|slot_a) + (1 - P(B|slot_a))] / 2` to eliminate positional bias.
 
-## 3. Output Schema
-`tournament`, `tier`, `round`, `player_a`, `player_a_nat`, `player_b`, `player_b_nat`, `player_a_won`
+**Backward-compat X trimming:** Older saved models have `n_features_in_ < 34`. `simulate_german_open.py` and `app.py` trim `X[:, :n]` via `model.n_features_in_` before calling `predict_proba`.
 
+**In-bracket Elo/EMA:** `simulate_german_open.py` deep-copies `player_stats` at the start of each Monte Carlo iteration so Elo/EMA updates don't bleed between simulations.
 
----
+**Scraper — winner detection:** Two Wikipedia formats exist:
+- Modern (2018+): `<b><span class="flagicon">…</span><a>Name</a></b>` → `flagicon.parent.name == "b"`
+- Classic (2010–2017): `<span class="flagicon">…</span><b><a>Name</a></b>` → `player_link.find_parent("b")`
+Both checks are applied with `or` in `extract_player_cells`.
 
-
-# Spec: `scraper_orchestrator.py` (BWF Macro-Scraper)
-
-## 1. Context & Objective
-Loop over every row in `data/config/tournaments_config.csv`, call `scrape_wiki_single`, inject
-`start_date` and `host_country`, and compile `data/raw/raw_matches.csv`.
-
-## 2. I/O Paths
-* Input:  `data/config/tournaments_config.csv`
-* Output: `data/raw/raw_matches.csv`
-
-## 3. Logic
-1. Read config. For each tournament: call scraper, insert `start_date` + `host_country`, append.
-2. `time.sleep(2)` between requests.
-3. Concatenate all frames and save.
-
-
----
-
-
-# Spec: `feature_engineering.py` (Temporal Feature Generation)
-
-## 1. Context & Objective
-Transform `data/raw/raw_matches.csv` → `data/interim/engineered_matches.csv`.
-
-## 2. The Golden Rule: Zero Data Leakage
-`hist = df[df['start_date'] < current_date]` — strict less-than. Sort by `start_date` first.
-
-## 3. Engineered Features
-1. `tier` (kept as-is)
-2. `same_nationality`
-3. `h2h_win_rate_a_vs_b` (default 0.5)
-4. `player_a_is_home`
-5. `player_a_matches_last_14_days`
-6. `player_a_days_since_last_match` (default 100)
-7. `player_a_recent_win_rate` (180-day window, default 0.5)
-8. `player_b_is_home`
-9. `player_b_matches_last_14_days`
-10. `player_b_days_since_last_match` (default 100)
-11. `player_b_recent_win_rate` (180-day window, default 0.5)
-
-## 4. I/O Paths
-* Input:  `data/raw/raw_matches.csv`
-* Output: `data/interim/engineered_matches.csv`
-
-
----
-
-
-# Spec: `data_loader.py` (Dataset Mirroring & Final Prep)
-
-## 1. Context & Objective
-Prepare `data/interim/engineered_matches.csv` for ML by enforcing predictive symmetry via mirroring.
-
-## 2. Columns to Drop
-`tournament`, `start_date`, `host_country`, `player_a_nat`, `player_b_nat`
-
-## 3. The Mirroring Logic
-1. Load and drop metadata columns.
-2. Create `mirrored_df`: swap all `player_a_*` ↔ `player_b_*` columns (including player name).
-3. Invert: `player_a_won = 1 - player_a_won`, `h2h_win_rate_a_vs_b = 1.0 - h2h_win_rate_a_vs_b`.
-4. Concatenate original + mirrored → row count exactly doubles.
-
-## 4. I/O Paths
-* Input:  `data/interim/engineered_matches.csv`
-* Output: `data/processed/final_training_data.csv`
-
-
-# Spec: `run_pipeline.py` (Master ETL Runner)
-
-## 1. Context & Objective
-Create a single master script in the root directory that executes the entire end-to-end BWF data engineering pipeline sequentially. 
-
-## 2. Execution Flow
-The script should use `subprocess.run` to execute the following files in order:
-1. `src/build_config.py` (Generates the 5-year tournament calendar)
-2. `src/scraper_orchestrator.py` (Scrapes Wikipedia and outputs `data/raw/raw_matches.csv`)
-3. `src/feature_engineering.py` (Calculates temporal features and outputs `data/interim/engineered_matches.csv`)
-4. `src/data_loader.py` (Mirrors the dataset and outputs `data/processed/final_training_data.csv`)
-
-## 3. Logging & Error Handling
-* Add clean console print statements (e.g., `[1/4] Building 5-year tournament config...`) before each step.
-* Track the execution time of each step and print it when the step completes.
-* If any script returns a non-zero exit code (fails), the master script should immediately halt, print an error message, and not attempt to run the subsequent steps.
-* At the very end, print a final success message with the total pipeline execution time.
+**Elo K-factors by tier:** `{100: 20, 300: 24, 500: 28, 750: 32, 1000: 40, 1500: 50}`. Default Elo = 1500. EMA α = 0.3, default = 0.5.
