@@ -739,7 +739,7 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True,
     )
-    n_sims  = st.slider("Monte Carlo Simulations", 100, 1_000, 1_000, 100)
+    n_sims  = st.slider("Monte Carlo Simulations", 100, 1_000, 100, 100)
     run_btn = st.button("▶ Run Simulation", use_container_width=True, type="primary")
 
 # ------------------------------------------------------------------
