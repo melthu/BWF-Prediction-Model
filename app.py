@@ -4,6 +4,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import time
 import pickle
+import calendar as cal_module
 from datetime import date
 
 import numpy as np
@@ -167,14 +168,6 @@ def format_tier(tier: int) -> str:
     return TIER_LABELS.get(tier, f"Tier {tier}")
 
 
-def format_tournament_label(row, today: date) -> str:
-    host_flag = TOURNAMENT_HOSTS.get(str(row["host_country"]), "🌐")
-    tier_str  = format_tier(int(row["tier"]))
-    date_str  = row["start_date"].strftime("%Y-%m-%d")
-    tag       = "🔮 UPCOMING" if row["start_date"].date() >= today else "📜 PAST"
-    return f"{tag} | 📅 {date_str} | {host_flag} {tier_str} | {row['tournament_name']}"
-
-
 def get_actual_winner(df: pd.DataFrame, tour_date: str):
     rows = df[
         (df["start_date"] == pd.Timestamp(tour_date)) &
@@ -186,9 +179,91 @@ def get_actual_winner(df: pd.DataFrame, tour_date: str):
     return r["player_a"] if r["player_a_won"] == 1 else r["player_b"]
 
 
+def html_month_calendar(
+    year: int,
+    month: int,
+    all_tours: pd.DataFrame,
+    today: date,
+    selected_key: str,
+) -> str:
+    """
+    Returns an HTML string for a monthly calendar grid.
+    Tournament days show host flag + abbreviated name.
+    Past = gray, upcoming = light blue, selected = dark navy.
+    """
+    mask = (
+        (all_tours["start_date"].dt.year  == year) &
+        (all_tours["start_date"].dt.month == month)
+    )
+    tour_by_day = {
+        row["start_date"].day: row
+        for _, row in all_tours[mask].iterrows()
+    }
+
+    # Abbreviate tournament name for the calendar cell
+    def _abbrev(name: str) -> str:
+        stop = {" Open", " Masters", " International", " Championship",
+                " Super Series", " World Tour Finals"}
+        s = name
+        for w in stop:
+            s = s.replace(w, "")
+        return s[:13]
+
+    hdr = "".join(
+        f'<th style="text-align:center;color:#999;font-size:10px;'
+        f'font-weight:600;padding:2px 0">{d}</th>'
+        for d in ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    )
+    tbody = ""
+    for week in cal_module.monthcalendar(year, month):
+        tbody += "<tr>"
+        for day in week:
+            if day == 0:
+                tbody += '<td style="padding:2px"></td>'
+                continue
+            if day in tour_by_day:
+                t        = tour_by_day[day]
+                key      = t["start_date"].strftime("%Y-%m-%d")
+                flag     = TOURNAMENT_HOSTS.get(str(t["host_country"]), "🌐")
+                is_past  = t["start_date"].date() < today
+                is_sel   = key == selected_key
+
+                if is_sel:
+                    bg, fg, bdr = "#1a3a5c", "white", "#1a3a5c"
+                elif is_past:
+                    bg, fg, bdr = "#eeeeee", "#666", "#ccc"
+                else:
+                    bg, fg, bdr = "#dceefb", "#1565c0", "#90caf9"
+
+                tbody += (
+                    f'<td style="padding:2px;vertical-align:top">'
+                    f'<div style="background:{bg};color:{fg};border:1px solid {bdr};'
+                    f'border-radius:5px;padding:3px 2px;text-align:center;'
+                    f'min-height:52px">'
+                    f'<div style="font-size:10px;font-weight:bold">{day}</div>'
+                    f'<div style="font-size:14px;line-height:1">{flag}</div>'
+                    f'<div style="font-size:8px;line-height:1.2;'
+                    f'overflow:hidden;word-break:break-word">{_abbrev(t["tournament_name"])}</div>'
+                    f'</div></td>'
+                )
+            else:
+                tbody += (
+                    f'<td style="text-align:center;color:#ccc;'
+                    f'font-size:10px;padding:2px">{day}</td>'
+                )
+        tbody += "</tr>"
+
+    return (
+        f'<table style="width:100%;border-collapse:collapse;table-layout:fixed">'
+        f"<thead><tr>{hdr}</tr></thead>"
+        f"<tbody>{tbody}</tbody>"
+        f"</table>"
+    )
+
+
 def build_shap_input(pa, pb, round_name, player_stats, h2h_rate_fn, h2h_last_fn,
                      scaler, player_to_id, tier_to_id, round_to_id, tier):
-    """Build (1, 34) feature array for SHAP: 4 cat IDs + 30 scaled cont features."""
+    """Build (1, 34) feature array: 4 cat IDs + 30 scaled cont features."""
     sa, sb   = player_stats[pa], player_stats[pb]
     tier_id  = tier_to_id.get(tier, 0)
     round_id = round_to_id.get(round_name, 0)
@@ -227,18 +302,19 @@ def compute_likely_bracket(
     for rnd in ROUND_ORDER:
         if not current:
             break
-        winners = []
-        for pa, pb in current:
-            p = predict_match(pa, pb, rnd, player_stats, h2h_rate_fn, h2h_last_fn,
-                              scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier)
-            winners.append(pa if p >= 0.5 else pb)
+        winners = [
+            pa if predict_match(pa, pb, rnd, player_stats, h2h_rate_fn, h2h_last_fn,
+                                scaler, player_to_id, tier_to_id, round_to_id,
+                                model_payload, tier) >= 0.5 else pb
+            for pa, pb in current
+        ]
         round_winners[rnd] = winners
         current = list(zip(winners[::2], winners[1::2]))
     return round_winners
 
 
 def render_bracket_figure(round_winners: dict[str, list[str]]) -> go.Figure:
-    """Plotly table showing the most-likely bracket path, round by round."""
+    """Plotly table for the most-likely bracket path (post-simulation)."""
     LABELS = {
         "first round":    "R1",
         "second round":   "R2",
@@ -255,29 +331,23 @@ def render_bracket_figure(round_winners: dict[str, list[str]]) -> go.Figure:
         players  = [format_name(p) for p in round_winners[rnd]]
         n        = len(players)
         is_final = rnd == rounds_present[-1]
-        colors   = []
-        for j in range(max_rows):
-            if j < n:
-                colors.append("#fff3cd" if is_final else ("#dceefb" if j % 2 == 0 else "#ffffff"))
-            else:
-                colors.append("#f5f5f5")
+        colors   = [
+            ("#fff3cd" if is_final else ("#dceefb" if j % 2 == 0 else "#ffffff"))
+            if j < n else "#f5f5f5"
+            for j in range(max_rows)
+        ]
         col_data.append(players + [""] * (max_rows - n))
         col_colors.append(colors)
 
     fig = go.Figure(data=[go.Table(
         header=dict(
             values=[f"<b>{h}</b>" for h in headers],
-            fill_color="#1a3a5c",
-            font=dict(color="white", size=13),
-            align="center",
-            height=34,
+            fill_color="#1a3a5c", font=dict(color="white", size=13),
+            align="center", height=34,
         ),
         cells=dict(
-            values=col_data,
-            fill_color=col_colors,
-            align="center",
-            font=dict(size=11),
-            height=26,
+            values=col_data, fill_color=col_colors,
+            align="center", font=dict(size=11), height=26,
         ),
     )])
     fig.update_layout(margin=dict(l=0, r=0, t=4, b=0),
@@ -285,8 +355,57 @@ def render_bracket_figure(round_winners: dict[str, list[str]]) -> go.Figure:
     return fig
 
 
+def render_first_round_bracket(matchup_rows: list[dict]) -> go.Figure:
+    """
+    Pre-simulation bracket: first-round matchups with instant model probabilities.
+    Green = player A favoured, blue = player B favoured, yellow = toss-up.
+    Matchup pairs share a background so the bracket structure is visible.
+    """
+    pa_col, prob_col, pb_col = [], [], []
+    fill_a, fill_p, fill_b   = [], [], []
+
+    # Alternate pair shading (pairs of 2 share a background)
+    pair_colors = ["#f0f4ff", "#ffffff"]
+
+    for idx, r in enumerate(matchup_rows):
+        p      = r["p_a_wins"]
+        pair_bg = pair_colors[(idx // 2) % 2]
+
+        if p > 0.60:
+            ca, cb = "#c8e6c9", pair_bg   # A favoured → A green
+        elif p < 0.40:
+            ca, cb = pair_bg, "#c8e6c9"   # B favoured → B green
+        else:
+            ca = cb = "#fff9c4"           # toss-up → both yellow
+
+        pa_col.append(format_name(r["Player A"]))
+        prob_col.append(f"{p:.0%}")
+        pb_col.append(format_name(r["Player B"]))
+        fill_a.append(ca)
+        fill_p.append(pair_bg)
+        fill_b.append(cb)
+
+    fig = go.Figure(data=[go.Table(
+        columnwidth=[130, 40, 130],
+        header=dict(
+            values=["<b>Player A</b>", "<b>P(A)</b>", "<b>Player B</b>"],
+            fill_color="#1a3a5c", font=dict(color="white", size=12),
+            align="center", height=32,
+        ),
+        cells=dict(
+            values=[pa_col, prob_col, pb_col],
+            fill_color=[fill_a, fill_p, fill_b],
+            align=["left", "center", "left"],
+            font=dict(size=11), height=28,
+        ),
+    )])
+    n = len(matchup_rows)
+    fig.update_layout(margin=dict(l=0, r=0, t=4, b=0),
+                      height=max(180, 32 * n + 70))
+    return fig
+
+
 def build_radar_chart(pa: str, pb: str, player_stats: dict, h2h_rate_fn) -> go.Figure:
-    """Plotly radar chart comparing two players across 5 normalized dimensions."""
     extractors = {
         "Elo":       lambda s: s["elo"],
         "Form":      lambda s: s["ema_form"],
@@ -315,10 +434,8 @@ def build_radar_chart(pa: str, pb: str, player_stats: dict, h2h_rate_fn) -> go.F
         ))
     fig.update_layout(
         polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
-        showlegend=True,
-        legend=dict(x=0.8, y=1.1),
-        margin=dict(l=30, r=30, t=30, b=30),
-        height=380,
+        showlegend=True, legend=dict(x=0.8, y=1.1),
+        margin=dict(l=30, r=30, t=30, b=30), height=380,
     )
     return fig
 
@@ -326,7 +443,6 @@ def build_radar_chart(pa: str, pb: str, player_stats: dict, h2h_rate_fn) -> go.F
 def build_form_chart(player: str, tour_date_str: str, df: pd.DataFrame,
                      scaler, player_to_id, tier_to_id, round_to_id,
                      model_payload, tier: int):
-    """DataFrame of the player's last 5 pre-tournament matches with predicted win probs."""
     cutoff = pd.Timestamp(tour_date_str)
     mask   = (
         ((df["player_a"] == player) | (df["player_b"] == player)) &
@@ -442,62 +558,121 @@ def get_all_tournaments() -> pd.DataFrame:
 
 st.set_page_config(page_title="BWF Live Terminal", page_icon="🏸", layout="wide")
 
-if "sim_results" not in st.session_state:
-    st.session_state["sim_results"] = {}
-if "shap_analyzed" not in st.session_state:
-    st.session_state["shap_analyzed"] = None
+all_tours = get_all_tournaments()
+
+# Session state initialisation
+_default_row = all_tours.iloc[0]
+_default_key = _default_row["start_date"].strftime("%Y-%m-%d")
+
+if "sim_results"       not in st.session_state:
+    st.session_state["sim_results"]       = {}
+if "shap_analyzed"     not in st.session_state:
+    st.session_state["shap_analyzed"]     = None
+if "selected_tour_key" not in st.session_state:
+    st.session_state["selected_tour_key"] = _default_key
+if "cal_year"          not in st.session_state:
+    st.session_state["cal_year"]          = _default_row["start_date"].year
+if "cal_month"         not in st.session_state:
+    st.session_state["cal_month"]         = _default_row["start_date"].month
 
 st.title("🏸 BWF Men's Singles — Live Point-in-Time Terminal")
 
 # ------------------------------------------------------------------
-# Sidebar — Timeline Navigator
+# Sidebar — calendar + tournament picker
 # ------------------------------------------------------------------
 
-all_tours = get_all_tournaments()
-
 with st.sidebar:
-    st.header("⚙️ Settings")
-    st.subheader("📆 Timeline Navigator")
+    cal_year  = st.session_state["cal_year"]
+    cal_month = st.session_state["cal_month"]
 
-    default_date = all_tours.iloc[0]["start_date"].date()
-    picked_date  = st.date_input(
-        "Browse by month",
-        value=default_date,
-        min_value=date(2010, 1, 1),
-        max_value=date(2026, 12, 31),
+    # ── Month navigation ─────────────────────────────────────────
+    nav_l, nav_m, nav_r = st.columns([1, 4, 1])
+    if nav_l.button("◀", key="cal_prev"):
+        if cal_month == 1:
+            st.session_state["cal_year"]  = cal_year - 1
+            st.session_state["cal_month"] = 12
+        else:
+            st.session_state["cal_month"] = cal_month - 1
+        st.rerun()
+
+    nav_m.markdown(
+        f"<p style='text-align:center;font-weight:700;margin:6px 0'>"
+        f"{cal_module.month_name[cal_month]} {cal_year}</p>",
+        unsafe_allow_html=True,
     )
 
-    # Filter to picked month/year; fall back to year; then all
-    mask_month = (
-        (all_tours["start_date"].dt.year  == picked_date.year) &
-        (all_tours["start_date"].dt.month == picked_date.month)
-    )
-    filtered = all_tours[mask_month]
-    if filtered.empty:
-        st.caption(f"No events in {picked_date.strftime('%B %Y')} — showing {picked_date.year}.")
-        filtered = all_tours[all_tours["start_date"].dt.year == picked_date.year]
-    if filtered.empty:
-        filtered = all_tours
+    if nav_r.button("▶", key="cal_next"):
+        if cal_month == 12:
+            st.session_state["cal_year"]  = cal_year + 1
+            st.session_state["cal_month"] = 1
+        else:
+            st.session_state["cal_month"] = cal_month + 1
+        st.rerun()
 
-    labels = [format_tournament_label(row, TODAY) for _, row in filtered.iterrows()]
-    selected_label = st.selectbox("Tournament", labels, index=0, label_visibility="collapsed")
-    t_row     = filtered.iloc[labels.index(selected_label)]
-    selected  = t_row["tournament_name"]
-    tour_date = t_row["start_date"].strftime("%Y-%m-%d")
-    tier      = int(t_row["tier"])
-
-    host_flag = TOURNAMENT_HOSTS.get(str(t_row["host_country"]), "🌐")
-    st.caption(
-        f"{host_flag} **{selected}**  \n"
-        f"📅 {tour_date}  |  🏆 {format_tier(tier)}"
+    # ── HTML calendar ─────────────────────────────────────────────
+    st.markdown(
+        html_month_calendar(
+            cal_year, cal_month, all_tours,
+            TODAY, st.session_state["selected_tour_key"],
+        ),
+        unsafe_allow_html=True,
     )
+    st.markdown("<div style='height:6px'></div>", unsafe_allow_html=True)
+
+    # ── Tournament picker (current month, flag + name only) ───────
+    month_mask  = (
+        (all_tours["start_date"].dt.year  == cal_year) &
+        (all_tours["start_date"].dt.month == cal_month)
+    )
+    month_tours = all_tours[month_mask].sort_values("start_date")
+
+    if month_tours.empty:
+        st.caption("No tournaments this month — use ◀▶ to navigate.")
+        # Keep whatever was previously selected
+    else:
+        sel_labels = []
+        for _, r in month_tours.iterrows():
+            flag     = TOURNAMENT_HOSTS.get(str(r["host_country"]), "🌐")
+            is_past  = r["start_date"].date() < TODAY
+            pfx      = "📜" if is_past else "🔮"
+            tier_str = format_tier(int(r["tier"]))
+            sel_labels.append(f"{pfx} {flag}  {tier_str} — {r['tournament_name']}")
+
+        # Find index of currently selected tournament (if in this month)
+        cur_idx = 0
+        for i, (_, r) in enumerate(month_tours.iterrows()):
+            if r["start_date"].strftime("%Y-%m-%d") == st.session_state["selected_tour_key"]:
+                cur_idx = i
+                break
+
+        sel_choice = st.selectbox(
+            "Tournament", sel_labels, index=cur_idx,
+            label_visibility="collapsed",
+        )
+        new_key = month_tours.iloc[sel_labels.index(sel_choice)]["start_date"].strftime("%Y-%m-%d")
+        if new_key != st.session_state["selected_tour_key"]:
+            st.session_state["selected_tour_key"] = new_key
+            st.rerun()
 
     st.divider()
     n_sims  = st.slider("Monte Carlo Simulations", 1_000, 50_000, 10_000, 1_000)
     run_btn = st.button("▶ Run Simulation", use_container_width=True, type="primary")
 
 # ------------------------------------------------------------------
-# Load data & build tournament state (fast DF filter, runs every render)
+# Derive active tournament from session state
+# ------------------------------------------------------------------
+
+tour_date = st.session_state["selected_tour_key"]
+t_match   = all_tours[all_tours["start_date"] == pd.Timestamp(tour_date)]
+if t_match.empty:
+    t_match = all_tours.iloc[0:1]
+t_row_sel = t_match.iloc[0]
+selected  = t_row_sel["tournament_name"]
+tier      = int(t_row_sel["tier"])
+host_flag = TOURNAMENT_HOSTS.get(str(t_row_sel["host_country"]), "🌐")
+
+# ------------------------------------------------------------------
+# Load data & build tournament state
 # ------------------------------------------------------------------
 
 model_payload, preprocessors, df = load_resources()
@@ -526,8 +701,8 @@ with tab_engine:
             f"No first-round data for **{selected}** ({tour_date}).  \n"
             "Try a different month, or re-run `make features` + `make train`."
         )
+
     elif run_btn:
-        # ── Setup steps ─────────────────────────────────────────
         with st.status("🔬 Point-in-Time Engine", expanded=True) as sim_status:
             st.write(f"📅 **{selected}** — data cut-off at `{tour_date}`")
             st.write(
@@ -538,93 +713,84 @@ with tab_engine:
             if actual_winner:
                 st.write(f"📋 Actual winner on record: **{format_name(actual_winner)}**")
             st.write(f"🎲 Launching **{n_sims:,}** Monte Carlo iterations…")
-            sim_status.update(
-                label=f"Simulating {selected}…",
-                state="running",
-                expanded=False,
-            )
+            sim_status.update(label=f"Simulating {selected}…",
+                              state="running", expanded=False)
 
-        # ── Live ticker (runs outside st.status context) ─────────
-        ticker_ph = st.empty()
-        win_counts: dict[str, int] = {}
-        rng = np.random.default_rng(42)
-        t0  = time.time()
+            # ── Live ticker ─────────────────────────────────────
+            ticker_ph  = st.empty()
+            win_counts: dict[str, int] = {}
+            rng = np.random.default_rng(42)
+            t0  = time.time()
 
-        for i in range(n_sims):
-            champion = simulate_bracket(
-                r32_matchups, player_stats,
-                h2h_rate_fn, h2h_last_fn,
-                scaler, player_to_id, tier_to_id, round_to_id,
-                model_payload, rng, tier,
-            )
-            win_counts[champion] = win_counts.get(champion, 0) + 1
-
-            if (i + 1) % 500 == 0 or (i + 1) == n_sims:
-                n_done  = i + 1
-                lb_live = (
-                    pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
-                    .sort_values("Wins", ascending=False)
-                    .head(10)
-                    .reset_index(drop=True)
+            for i in range(n_sims):
+                champion = simulate_bracket(
+                    r32_matchups, player_stats,
+                    h2h_rate_fn, h2h_last_fn,
+                    scaler, player_to_id, tier_to_id, round_to_id,
+                    model_payload, rng, tier,
                 )
-                lb_live["Win %"]  = (lb_live["Wins"] / n_done * 100).round(1)
-                lb_live["Player"] = lb_live["Player"].apply(format_name)
-                ticker_ph.dataframe(
-                    lb_live[["Player", "Win %"]].style.format({"Win %": "{:.1f}%"}),
-                    use_container_width=True,
-                    hide_index=True,
+                win_counts[champion] = win_counts.get(champion, 0) + 1
+
+                if (i + 1) % 500 == 0 or (i + 1) == n_sims:
+                    n_done  = i + 1
+                    lb_live = (
+                        pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
+                        .sort_values("Wins", ascending=False).head(10)
+                        .reset_index(drop=True)
+                    )
+                    lb_live["Win %"]  = (lb_live["Wins"] / n_done * 100).round(1)
+                    lb_live["Player"] = lb_live["Player"].apply(format_name)
+                    ticker_ph.dataframe(
+                        lb_live[["Player", "Win %"]].style.format({"Win %": "{:.1f}%"}),
+                        use_container_width=True, hide_index=True,
+                    )
+
+            elapsed = time.time() - t0
+
+            # ── Build final results ──────────────────────────────
+            leaderboard = (
+                pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
+                .sort_values("Wins", ascending=False).reset_index(drop=True)
+            )
+            leaderboard["Win %"] = (leaderboard["Wins"] / n_sims * 100).round(2)
+            if actual_winner:
+                leaderboard["Actual Result"] = leaderboard["Player"].apply(
+                    lambda p: "🥇 Winner" if p == actual_winner else ""
                 )
 
-        elapsed = time.time() - t0
+            bracket_rows = []
+            for _, row in r32_matchups.iterrows():
+                p = predict_match(
+                    row["player_a"], row["player_b"], "first round",
+                    player_stats, h2h_rate_fn, h2h_last_fn,
+                    scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
+                )
+                bracket_rows.append({
+                    "Player A": row["player_a"], "Player B": row["player_b"],
+                    "P(A wins)": round(p, 3),
+                })
+            bracket_df = pd.DataFrame(bracket_rows)
 
-        # ── Build full results ───────────────────────────────────
-        leaderboard = (
-            pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
-            .sort_values("Wins", ascending=False)
-            .reset_index(drop=True)
-        )
-        leaderboard["Win %"] = (leaderboard["Wins"] / n_sims * 100).round(2)
-        if actual_winner:
-            leaderboard["Actual Result"] = leaderboard["Player"].apply(
-                lambda p: "🥇 Winner" if p == actual_winner else ""
-            )
-
-        bracket_rows = []
-        for _, row in r32_matchups.iterrows():
-            p = predict_match(
-                row["player_a"], row["player_b"], "first round",
-                player_stats, h2h_rate_fn, h2h_last_fn,
+            round_winners = compute_likely_bracket(
+                r32_matchups, player_stats, h2h_rate_fn, h2h_last_fn,
                 scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
             )
-            bracket_rows.append({
-                "Player A":  row["player_a"],
-                "Player B":  row["player_b"],
-                "P(A wins)": round(p, 3),
-            })
-        bracket_df = pd.DataFrame(bracket_rows)
 
-        round_winners = compute_likely_bracket(
-            r32_matchups, player_stats, h2h_rate_fn, h2h_last_fn,
-            scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
-        )
-
-        # Store and clean rerun
-        st.session_state["sim_results"][sim_key] = {
-            "bracket_df":    bracket_df,
-            "leaderboard":   leaderboard,
-            "round_winners": round_winners,
-            "actual_winner": actual_winner,
-            "elapsed":       elapsed,
-        }
-        sim_status.update(
-            label=f"✅ {n_sims:,} sims complete in {elapsed:.1f}s",
-            state="complete",
-            expanded=False,
-        )
+            st.session_state["sim_results"][sim_key] = {
+                "bracket_df":    bracket_df,
+                "leaderboard":   leaderboard,
+                "round_winners": round_winners,
+                "actual_winner": actual_winner,
+                "elapsed":       elapsed,
+            }
+            sim_status.update(
+                label=f"✅ {n_sims:,} sims complete — {elapsed:.1f}s",
+                state="complete", expanded=False,
+            )
         st.rerun()
 
     elif sim_key in st.session_state["sim_results"]:
-        # ── Display stored results ───────────────────────────────
+        # ── Show stored results ──────────────────────────────────
         res           = st.session_state["sim_results"][sim_key]
         bracket_df    = res["bracket_df"]
         leaderboard   = res["leaderboard"]
@@ -633,12 +799,11 @@ with tab_engine:
         elapsed       = res["elapsed"]
 
         st.success(
-            f"✅ **{selected}** — {n_sims:,} simulations  ·  {elapsed:.1f}s  ·  "
+            f"✅ **{selected}** — {n_sims:,} sims  ·  {elapsed:.1f}s  ·  "
             f"Model: **{model_payload.get('name', '?')}**  ·  Val AUC: **0.7872**"
         )
 
         col_left, col_right = st.columns(2)
-
         with col_left:
             st.subheader(f"First Round ({len(bracket_df)} matchups)")
             disp_br = bracket_df.copy()
@@ -648,8 +813,7 @@ with tab_engine:
                 disp_br.style
                 .format({"P(A wins)": "{:.3f}"})
                 .background_gradient(subset=["P(A wins)"], cmap="RdYlGn", vmin=0.3, vmax=0.7),
-                use_container_width=True,
-                hide_index=True,
+                use_container_width=True, hide_index=True,
             )
 
         with col_right:
@@ -668,26 +832,45 @@ with tab_engine:
                 disp_lb.style
                 .format({"Win %": "{:.2f}%"})
                 .background_gradient(subset=["Win %"], cmap="Blues"),
-                use_container_width=True,
-                hide_index=True,
+                use_container_width=True, hide_index=True,
             )
 
-        # ── Most Likely Bracket ──────────────────────────────────
         if round_winners:
             st.subheader("🌳 Most Likely Bracket Path")
             st.plotly_chart(render_bracket_figure(round_winners), use_container_width=True)
 
     else:
-        st.info(
-            f"📅 Showing roster for **{selected}** ({tour_date}).  \n"
-            "Click **▶ Run Simulation** in the sidebar to launch the engine."
+        # ── Pre-run: show bracket matchups with instant probabilities ──
+        is_upcoming = pd.Timestamp(tour_date).date() >= TODAY
+        tag = "🔮 Upcoming" if is_upcoming else "📜 Historical"
+        st.subheader(f"{host_flag} {selected}  ·  {format_tier(tier)}  ·  {tag}")
+        st.caption(
+            f"{len(roster)} players in bracket  ·  "
+            "Click **▶ Run Simulation** in the sidebar to launch Monte Carlo analysis."
         )
-        if roster:
-            st.caption(f"{len(roster)} players in bracket:")
-            preview = " · ".join(format_name(p) for p in roster[:12])
-            if len(roster) > 12:
-                preview += f" … (+{len(roster) - 12} more)"
-            st.write(preview)
+
+        if roster and not r32_matchups.empty:
+            # Compute first-round win probabilities (fast — no MC)
+            pre_rows = []
+            for _, mrow in r32_matchups.iterrows():
+                p = predict_match(
+                    mrow["player_a"], mrow["player_b"], "first round",
+                    player_stats, h2h_rate_fn, h2h_last_fn,
+                    scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
+                )
+                pre_rows.append({
+                    "Player A": mrow["player_a"],
+                    "p_a_wins": p,
+                    "Player B": mrow["player_b"],
+                })
+            st.plotly_chart(
+                render_first_round_bracket(pre_rows),
+                use_container_width=True,
+            )
+            st.caption(
+                "🟢 Green = model favourite  ·  🟡 Yellow = near 50/50  ·  "
+                "Pair shading shows which players meet in round 2"
+            )
 
 
 # ── Tab 2: Matchup Analyzer ────────────────────────────────────────
@@ -719,7 +902,6 @@ with tab_matchup:
         sa = player_stats[player_a]
         sb = player_stats[player_b]
 
-        # ── Win probability ──────────────────────────────────────
         p_win = predict_match(
             player_a, player_b, "first round",
             player_stats, h2h_rate_fn, h2h_last_fn,
@@ -782,8 +964,8 @@ with tab_matchup:
                 shap_vals.feature_names = feat_names
 
             st.caption(
-                f"How each feature shifts the model's log-odds from the base value "
-                f"to the final prediction for **{format_name(player_a)}** in Player A slot."
+                f"How each feature shifts the log-odds for "
+                f"**{format_name(player_a)}** in the Player A slot."
             )
             shap.plots.waterfall(shap_vals[0], max_display=20, show=False)
             fig = plt.gcf()
@@ -803,9 +985,7 @@ with tab_matchup:
         # ── Player Form ──────────────────────────────────────────
         st.divider()
         st.subheader("📈 Recent Form — Last 5 Matches")
-        st.caption(
-            "Win probability estimated strictly from pre-match data (no leakage)."
-        )
+        st.caption("Win probability estimated strictly from pre-match data (no leakage).")
         form_col_a, form_col_b = st.columns(2)
         for col_w, player_name in [(form_col_a, player_a), (form_col_b, player_b)]:
             with col_w:
@@ -826,8 +1006,8 @@ with tab_matchup:
                     ax.axhline(0.5, color="gray", linestyle="--", linewidth=1)
                     ax.set_ylim(0, 1)
                     ax.set_xticks(range(len(fdf)))
-                    ax.set_xticklabels(fdf["Date"].tolist(),
-                                       rotation=30, ha="right", fontsize=7)
+                    ax.set_xticklabels(fdf["Date"].tolist(), rotation=30,
+                                       ha="right", fontsize=7)
                     ax.set_ylabel("Win Probability")
                     ax.set_title(f"Last {len(fdf)} matches")
                     fig2.tight_layout()
@@ -838,8 +1018,7 @@ with tab_matchup:
                             lambda v: "color: green" if v == "W" else "color: red",
                             subset=["Result"],
                         ),
-                        use_container_width=True,
-                        hide_index=True,
+                        use_container_width=True, hide_index=True,
                     )
     else:
         st.info("Select two players above and click **🔍 Analyze Matchup**.")
