@@ -155,13 +155,89 @@ TOURNAMENT_HOSTS: dict[str, str] = {
 
 TODAY = date.today()
 
+# Nationality → flag for every country that appears in raw_matches.csv
+NATIONALITY_FLAGS: dict = {
+    "Algeria":              "🇩🇿",
+    "Australia":            "🇦🇺",
+    "Austria":              "🇦🇹",
+    "Azerbaijan":           "🇦🇿",
+    "Bahrain":              "🇧🇭",
+    "Belgium":              "🇧🇪",
+    "Brazil":               "🇧🇷",
+    "Bulgaria":             "🇧🇬",
+    "Canada":               "🇨🇦",
+    "Chile":                "🇨🇱",
+    "China":                "🇨🇳",
+    "Chinese Taipei":       "🇹🇼",
+    "Croatia":              "🇭🇷",
+    "Cuba":                 "🇨🇺",
+    "Czech Republic":       "🇨🇿",
+    "Denmark":              "🇩🇰",
+    "Egypt":                "🇪🇬",
+    "El Salvador":          "🇸🇻",
+    "England":              "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
+    "Estonia":              "🇪🇪",
+    "Finland":              "🇫🇮",
+    "France":               "🇫🇷",
+    "Germany":              "🇩🇪",
+    "Guatemala":            "🇬🇹",
+    "Hong Kong":            "🇭🇰",
+    "Hungary":              "🇭🇺",
+    "India":                "🇮🇳",
+    "Indonesia":            "🇮🇩",
+    "Israel":               "🇮🇱",
+    "Italy":                "🇮🇹",
+    "Japan":                "🇯🇵",
+    "Kazakhstan":           "🇰🇿",
+    "Lithuania":            "🇱🇹",
+    "Luxembourg":           "🇱🇺",
+    "Macau":                "🇲🇴",
+    "Malaysia":             "🇲🇾",
+    "Mauritius":            "🇲🇺",
+    "Mexico":               "🇲🇽",
+    "Mongolia":             "🇲🇳",
+    "Myanmar":              "🇲🇲",
+    "Nepal":                "🇳🇵",
+    "Netherlands":          "🇳🇱",
+    "New Zealand":          "🇳🇿",
+    "Poland":               "🇵🇱",
+    "Portugal":             "🇵🇹",
+    "Republic of Ireland":  "🇮🇪",
+    "Russia":               "🇷🇺",
+    "Saudi Arabia":         "🇸🇦",
+    "Scotland":             "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "Singapore":            "🇸🇬",
+    "Slovakia":             "🇸🇰",
+    "Slovenia":             "🇸🇮",
+    "South Korea":          "🇰🇷",
+    "Spain":                "🇪🇸",
+    "Sri Lanka":            "🇱🇰",
+    "Sweden":               "🇸🇪",
+    "Switzerland":          "🇨🇭",
+    "Syria":                "🇸🇾",
+    "Thailand":             "🇹🇭",
+    "Trinidad and Tobago":  "🇹🇹",
+    "Turkey":               "🇹🇷",
+    "Ukraine":              "🇺🇦",
+    "United Arab Emirates": "🇦🇪",
+    "United Kingdom":       "🇬🇧",
+    "United States":        "🇺🇸",
+    "Vietnam":              "🇻🇳",
+    "Zambia":               "🇿🇲",
+}
+
+# Populated at bootstrap from raw_matches.csv — player name → flag emoji
+_player_nat_flags: dict = {}
+
 
 # ------------------------------------------------------------------
 # Pure helpers
 # ------------------------------------------------------------------
 
 def format_name(name: str) -> str:
-    return f"{PLAYER_FLAGS.get(name, '🏸')} {name}"
+    # PLAYER_FLAGS has hand-curated overrides; fall back to nationality from data
+    flag = PLAYER_FLAGS.get(name) or _player_nat_flags.get(name, "🏸")
+    return f"{flag} {name}"
 
 
 def format_tier(tier: int) -> str:
@@ -435,6 +511,23 @@ def load_resources():
     return model_payload, preprocessors, df
 
 
+@st.cache_data(show_spinner=False)
+def load_player_nat_flags() -> dict:
+    """Build player_name → flag_emoji from raw_matches.csv nationalities."""
+    try:
+        raw = pd.read_csv("data/raw/raw_matches.csv")
+        result = {}
+        for side in ("a", "b"):
+            for _, row in raw[["player_" + side, "player_" + side + "_nat"]].iterrows():
+                name = row.iloc[0]
+                nat  = row.iloc[1]
+                if pd.notna(name) and pd.notna(nat) and name not in result:
+                    result[name] = NATIONALITY_FLAGS.get(nat, "🏸")
+        return result
+    except Exception:
+        return {}
+
+
 @st.cache_resource
 def get_shap_explainer():
     model_payload, _, _ = load_resources()
@@ -472,6 +565,7 @@ st.markdown(
 )
 
 all_tours = get_all_tournaments()
+_player_nat_flags.update(load_player_nat_flags())
 
 # Session state initialisation
 _default_row = all_tours.iloc[0]
@@ -595,7 +689,7 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True,
     )
-    n_sims  = st.slider("Monte Carlo Simulations", 1_000, 50_000, 10_000, 1_000)
+    n_sims  = st.slider("Monte Carlo Simulations", 1_000, 10_000, 1_000, 500)
     run_btn = st.button("▶ Run Simulation", use_container_width=True, type="primary")
 
 # ------------------------------------------------------------------
