@@ -754,7 +754,7 @@ with tab_engine:
             )
             win_counts[champion] = win_counts.get(champion, 0) + 1
 
-            if (i + 1) % 500 == 0 or (i + 1) == n_sims:
+            if (i + 1) % 100 == 0 or (i + 1) == n_sims:
                 n_done   = i + 1
                 elapsed  = time.time() - t0
                 rate     = n_done / elapsed if elapsed > 0 else 1

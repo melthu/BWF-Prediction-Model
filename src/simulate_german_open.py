@@ -1,6 +1,5 @@
 import sys
 import os
-import copy
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -243,8 +242,8 @@ def simulate_bracket(
 ):
     """Run one full bracket simulation with in-bracket Elo/EMA updates.
     Returns the champion name."""
-    # Deep-copy so each simulation starts from the same Day-1 state
-    sim_stats = copy.deepcopy(player_stats)
+    # Shallow-copy the inner dicts (all values are primitives, no deepcopy needed)
+    sim_stats = {name: dict(stats) for name, stats in player_stats.items()}
 
     t = TIER if tier is None else tier
     K = K_BY_TIER.get(t, 24)
