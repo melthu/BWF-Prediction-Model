@@ -3,6 +3,7 @@ numpy
 pandas
 scikit-learn
 torch
+pytorch-tabnet
 lightgbm
 xgboost
 catboost

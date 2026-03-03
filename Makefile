@@ -1,4 +1,4 @@
-.PHONY: data features train dashboard all
+.PHONY: data features train train_tabnet dashboard all
 
 data:        ## Scrape Wikipedia + rebuild raw CSV
 	python3 run_pipeline.py --scrape
@@ -8,6 +8,9 @@ features:    ## Re-engineer features + mirror dataset
 
 train:       ## Train all models, save best to models/best_model.pkl
 	python3 src/train_lgbm.py && python3 src/train_catboost.py && python3 src/train_xgb.py && python3 src/train_ensemble.py
+
+train_tabnet: ## Train TabNet and re-run ensemble selection
+	python3 src/train_tabnet.py && python3 src/train_ensemble.py
 
 dashboard:   ## Launch Streamlit app
 	streamlit run app.py

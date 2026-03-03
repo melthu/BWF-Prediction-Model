@@ -9,12 +9,14 @@ from sklearn.metrics import roc_auc_score
 
 from src.dataset import extract_numpy, get_train_val_datasets
 from src.model import BWFDeepFM
+from src.train_tabnet import TabNetWrapper  # noqa: F401 — needed for pickle unpickling
 
 DATA_PATH  = "data/processed/final_training_data.csv"
 MODEL_PATHS = {
     "lgbm":     "models/best_lgbm.pkl",
     "catboost": "models/best_catboost.pkl",
     "xgb":      "models/best_xgb.pkl",
+    "tabnet":   "models/best_tabnet.pkl",
 }
 DEEPFM_PATH     = "models/best_deepfm.pt"
 BEST_MODEL_PATH = "models/best_model.pkl"
@@ -51,6 +53,9 @@ class DeepFMWrapper:
 def load_tree_models():
     models = {}
     for name, path in MODEL_PATHS.items():
+        if not os.path.exists(path):
+            print(f"  {name:<12} not found at {path} — skipping.")
+            continue
         with open(path, "rb") as f:
             models[name] = pickle.load(f)
         print(f"  Loaded {name} from {path}")
@@ -124,16 +129,20 @@ def train():
     best_single_auc  = individual_aucs[best_single_name]
 
     # ------------------------------------------------------------------
-    # Equal-weight ensemble over qualifying models
+    # AUC-weighted ensemble — weight proportional to (AUC - 0.5)
+    # so models closer to chance contribute less
     # ------------------------------------------------------------------
-    weights = [1 / len(individual_probs)] * len(individual_probs)
+    names  = list(individual_probs.keys())
+    aucs_v = np.array([individual_aucs[n] for n in names])
+    raw_w  = aucs_v - 0.5                          # remove chance-level offset
+    weights = raw_w / raw_w.sum()                  # normalise to sum=1
     ensemble_probs = sum(
-        w * individual_probs[name]
-        for w, name in zip(weights, individual_probs.keys())
+        w * individual_probs[n] for w, n in zip(weights, names)
     )
     ensemble_auc = roc_auc_score(y_val, ensemble_probs)
 
-    print(f"\n  {'ensemble':<12} AUC = {ensemble_auc:.4f}")
+    print(f"\n  {'ensemble':<12} AUC = {ensemble_auc:.4f}  "
+          f"(weights: {', '.join(f'{n}={w:.2f}' for n, w in zip(names, weights))})")
 
     # ------------------------------------------------------------------
     # Print summary table
@@ -157,12 +166,18 @@ def train():
     if "deepfm" in individual_probs:
         all_models["deepfm"] = deepfm_wrapper
 
+    # Build AUC-based weights for the payload (same calculation, over all_models keys)
+    model_names_ord = list(all_models.keys())
+    payload_aucs    = np.array([individual_aucs[n] for n in model_names_ord])
+    payload_raw_w   = payload_aucs - 0.5
+    payload_weights = (payload_raw_w / payload_raw_w.sum()).tolist()
+
     if ensemble_auc >= best_single_auc:
         payload = {
             "type":    "ensemble",
             "models":  all_models,
-            "weights": [1 / len(all_models)] * len(all_models),
-            "names":   list(all_models.keys()),
+            "weights": payload_weights,
+            "names":   model_names_ord,
         }
         saved_auc  = ensemble_auc
         saved_name = "ensemble"
