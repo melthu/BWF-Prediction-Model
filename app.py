@@ -739,7 +739,7 @@ with st.sidebar:
         "</div>",
         unsafe_allow_html=True,
     )
-    n_sims  = st.slider("Monte Carlo Simulations", 1_000, 10_000, 1_000, 500)
+    n_sims  = st.slider("Monte Carlo Simulations", 100, 1_000, 1_000, 100)
     run_btn = st.button("▶ Run Simulation", use_container_width=True, type="primary")
 
 # ------------------------------------------------------------------
@@ -813,7 +813,7 @@ with tab_engine:
             )
             win_counts[champion] = win_counts.get(champion, 0) + 1
 
-            if (i + 1) % 100 == 0 or (i + 1) == n_sims:
+            if (i + 1) % 10 == 0 or (i + 1) == n_sims:
                 n_done   = i + 1
                 elapsed  = time.time() - t0
                 rate     = n_done / elapsed if elapsed > 0 else 1
