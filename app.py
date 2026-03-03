@@ -465,6 +465,12 @@ def get_all_tournaments() -> pd.DataFrame:
 
 st.set_page_config(page_title="BWF Live Terminal", page_icon="🏸", layout="wide")
 
+# Hide the Streamlit "running" spinner in the top-right corner
+st.markdown(
+    "<style>div[data-testid='stStatusWidget']{display:none!important}</style>",
+    unsafe_allow_html=True,
+)
+
 all_tours = get_all_tournaments()
 
 # Session state initialisation
@@ -638,7 +644,9 @@ with tab_engine:
                               state="running", expanded=False)
 
             # ── Live ticker ─────────────────────────────────────
-            ticker_ph  = st.empty()
+            progress_ph = st.progress(0, text="Starting…")
+            status_ph   = st.empty()
+            ticker_ph   = st.empty()
             win_counts: dict[str, int] = {}
             rng = np.random.default_rng(42)
             t0  = time.time()
@@ -653,7 +661,25 @@ with tab_engine:
                 win_counts[champion] = win_counts.get(champion, 0) + 1
 
                 if (i + 1) % 500 == 0 or (i + 1) == n_sims:
-                    n_done  = i + 1
+                    n_done   = i + 1
+                    elapsed  = time.time() - t0
+                    rate     = n_done / elapsed if elapsed > 0 else 1
+                    eta      = (n_sims - n_done) / rate
+                    pct      = n_done / n_sims
+                    leader   = max(win_counts, key=win_counts.get)
+                    lead_pct = win_counts[leader] / n_done * 100
+
+                    progress_ph.progress(
+                        pct,
+                        text=f"**{n_done:,} / {n_sims:,}** sims "
+                             f"({pct*100:.0f}%)  ·  "
+                             f"{rate:.0f} sims/s  ·  "
+                             f"ETA {eta:.0f}s",
+                    )
+                    status_ph.markdown(
+                        f"🏆 **Leader:** {format_name(leader)} — "
+                        f"**{lead_pct:.1f}%** championship probability"
+                    )
                     lb_live = (
                         pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
                         .sort_values("Wins", ascending=False).head(10)
