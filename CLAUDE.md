@@ -35,71 +35,9 @@ bwfML/
 │   └── processed/                      # ML-ready mirrored dataset (git-ignored)
 └── models/
     ├── best_params.json     # Optuna best hyperparameters (tracked)
-    └── *.pkl / *.pt         # trained artifacts (git-ignored, run make train)
+    ├── best_model.pkl / best_lgbm.pkl / best_catboost.pkl / best_xgb.pkl / best_tabnet.pkl  # tracked for deployment
+    └── best_deepfm.pt       # git-ignored (large — regenerate with make train)
 ```
-
----
-
-# Spec: `app.py` (Phase 5: The "Live Terminal" UI Revamp)
-
-## 1. Context & Objective
-Transform the Streamlit app into a live, interactive Point-in-Time trading terminal. It must feature a chronological tournament selector with a mini-calendar, live simulation progress rendering, a most-likely bracket visualizer, and a deep-dive Matchup Analyzer.
-
-## 2. UI Layout & Temporal Navigation
-1. **Sidebar - The Timeline:**
-   * Display the "Current Date" clearly.
-   * **Mini-Calendar Selector:** Implement `st.date_input` to render a mini-calendar.
-   * **Dynamic Dropdown:** When a user picks a date on the calendar, filter the tournament dropdown to show tournaments happening in that specific month/year.
-   * Format the tournament options to show: Date, Host Country Flag, Tier, and Tournament Name (e.g., "📅 2026-03-03 | 🏴󠁧󠁢󠁥󠁮󠁧󠁿 Super 1000 All England Open").
-   * Visually group them as [PAST] or [UPCOMING] relative to today.
-   * Add a slider for `N_SIMULATIONS`.
-
-## 3. The Live Engine (Tab 1)
-1. **Point-in-Time Training:** Show live steps with `st.status()` when training the model strictly on data before the selected date.
-2. **Live Ticker Effect:** Update the leaderboard placeholder every 500 simulations to show probabilities converging.
-3. **Most Likely Bracket:** Render a visual tree of the "Expected Bracket".
-
-## 4. Matchup Analyzer (Tab 2)
-1. Dropdowns to pick Player A and Player B.
-2. **Radar Chart:** Compare stats (Elo, Form, Streak, Fatigue) using Plotly.
-3. **SHAP Waterfall:** Explain the XGBoost prediction for this exact matchup.
-
-## 5. Flag Dictionaries
-1. Implement `PLAYER_NATIONS` and `TOURNAMENT_HOSTS` for UI emojis.
-
-# Spec: `app.py` (UI Upgrade: National Flags)
-
-## 1. Context & Objective
-Upgrade the Streamlit dashboard (`app.py`) to display national flag emojis next to player names to improve the visual UX.
-
-## 2. Implementation Logic
-1. **The Flag Dictionary:** Create a helper dictionary `PLAYER_FLAGS` at the top of `app.py` mapping the top ~40 BWF Men's Singles players to their country's emoji flag. 
-   * *Examples:* 'Viktor Axelsen': '🇩🇰', 'Shi Yuqi': '🇨🇳', 'Anders Antonsen': '🇩🇰', 'Jonatan Christie': '🇮🇩', 'Anthony Sinisuka Ginting': '🇮🇩', 'Kodai Naraoka': '🇯🇵', 'Kunlavut Vitidsarn': '🇹🇭', 'Li Shifeng': '🇨🇳', 'Chou Tien-chen': '🇹🇼', 'Lee Zii Jia': '🇲🇾', 'Loh Kean Yew': '🇸🇬', 'Prannoy H. S.': '🇮🇳', 'Lakshya Sen': '🇮🇳', 'Toma Junior Popov': '🇫🇷', 'Christo Popov': '🇫🇷', 'Kento Momota': '🇯🇵'.
-2. **The Helper Function:** Create a function `def format_name(player_name):` that looks up the player in the dictionary. If found, return `f"{flag} {player_name}"`. If not found, return `f"🏸 {player_name}"` as a fallback.
-3. **UI Integration:** * Update the **Leaderboard DataFrame**: Apply this formatting function to the 'Player' column before rendering it.
-   * Update the **First Round Bracket**: Format the player names in the bracket view.
-   * Update the **SHAP Explainer Tab**: Ensure the selection dropdowns and the "Tale of the Tape" headers display the flags alongside the names.
-
-# Spec: `app.py` (Phase 5: Point-in-Time Dashboard & UX)
-
-## 1. Context & Objective
-Upgrade the Streamlit dashboard to function as a Point-in-Time Historical Backtester with an interactive UI, real-time loading states, and a "Reality Check" actual-results overlay.
-
-## 2. Implementation Logic
-1. **Dynamic Point-in-Time Engine:**
-   * Allow the user to select *any* tournament from the dataset.
-   * When a tournament is selected, filter the master dataset to only include rows where `start_date < tournament_start_date`.
-   * Rapidly train a fresh model (or use strictly pre-calculated Point-in-Time features) on this subset to guarantee zero future data leakage.
-2. **Interactive Loading States (`st.status`):**
-   * Wrap the execution block in `with st.status("Running Point-in-Time Engine...", expanded=True) as status:`.
-   * Add `st.write()` steps inside to show progress: "Slicing historical data...", "Training Point-in-Time model...", "Running 10,000 Monte Carlo simulations...".
-   * Change the status to complete when finished.
-3. **The "Reality Check" Overlay:**
-   * Query the dataset to find the actual winner of the selected tournament.
-   * Add a column to the Monte Carlo probability leaderboard called `Actual Result`. 
-   * Place a gold medal emoji (🥇) or "Winner" text next to the player who actually won, so users can visually backtest the model's accuracy.
-4. **Tale of the Tape (Matchup Tab):**
-   * In the SHAP Explainer tab, render a side-by-side comparison of the two selected players' Point-in-Time stats (Current Elo, Fatigue, Win Streak) *before* rendering the SHAP waterfall plot.
 
 ## Pipeline
 
@@ -155,7 +93,7 @@ Best model saved to `models/best_model.pkl` as `{"type": "single", "model": xgb,
 
 **Backward-compat X trimming:** Older saved models have `n_features_in_ < 34`. `simulate_german_open.py` and `app.py` trim `X[:, :n]` via `model.n_features_in_` before calling `predict_proba`.
 
-**In-bracket Elo/EMA:** `simulate_german_open.py` deep-copies `player_stats` at the start of each Monte Carlo iteration so Elo/EMA updates don't bleed between simulations.
+**In-bracket Elo/EMA:** `simulate_german_open.py` copies `player_stats` at the start of each Monte Carlo iteration (`{name: dict(stats) for ...}`) so Elo/EMA updates don't bleed between simulations. All values are primitives so a shallow inner copy is sufficient — do not use `copy.deepcopy` here.
 
 **Scraper — winner detection:** Two Wikipedia formats exist:
 - Modern (2018+): `<b><span class="flagicon">…</span><a>Name</a></b>` → `flagicon.parent.name == "b"`
@@ -163,3 +101,5 @@ Best model saved to `models/best_model.pkl` as `{"type": "single", "model": xgb,
 Both checks are applied with `or` in `extract_player_cells`.
 
 **Elo K-factors by tier:** `{100: 20, 300: 24, 500: 28, 750: 32, 1000: 40, 1500: 50}`. Default Elo = 1500. EMA α = 0.3, default = 0.5.
+
+**`app.py` caching:** `_get_cached_tournament_state(tour_date, tier)` and `_get_h2h_hist(tour_date)` are `@st.cache_data` wrappers that prevent re-running pandas ops on every Streamlit rerun. `_make_h2h_fns(hist)` builds H2H closures over the cached slice. `build_h2h_lookups` is still imported and used directly inside `build_form_chart` (which passes a pre-filtered slice).
