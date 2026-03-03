@@ -310,55 +310,6 @@ def render_bracket_figure(round_winners: dict[str, list[str]]) -> go.Figure:
     return fig
 
 
-def render_first_round_bracket(matchup_rows: list[dict]) -> go.Figure:
-    """
-    Pre-simulation bracket: first-round matchups with instant model probabilities.
-    Green = player A favoured, blue = player B favoured, yellow = toss-up.
-    Matchup pairs share a background so the bracket structure is visible.
-    """
-    pa_col, prob_col, pb_col = [], [], []
-    fill_a, fill_p, fill_b   = [], [], []
-
-    # Alternate pair shading (pairs of 2 share a background)
-    pair_colors = ["#f0f4ff", "#ffffff"]
-
-    for idx, r in enumerate(matchup_rows):
-        p      = r["p_a_wins"]
-        pair_bg = pair_colors[(idx // 2) % 2]
-
-        if p > 0.60:
-            ca, cb = "#c8e6c9", pair_bg   # A favoured → A green
-        elif p < 0.40:
-            ca, cb = pair_bg, "#c8e6c9"   # B favoured → B green
-        else:
-            ca = cb = "#fff9c4"           # toss-up → both yellow
-
-        pa_col.append(format_name(r["Player A"]))
-        prob_col.append(f"{p:.0%}")
-        pb_col.append(format_name(r["Player B"]))
-        fill_a.append(ca)
-        fill_p.append(pair_bg)
-        fill_b.append(cb)
-
-    fig = go.Figure(data=[go.Table(
-        columnwidth=[130, 40, 130],
-        header=dict(
-            values=["<b>Player A</b>", "<b>P(A)</b>", "<b>Player B</b>"],
-            fill_color="#1a3a5c", font=dict(color="white", size=12),
-            align="center", height=32,
-        ),
-        cells=dict(
-            values=[pa_col, prob_col, pb_col],
-            fill_color=[fill_a, fill_p, fill_b],
-            align=["left", "center", "left"],
-            font=dict(size=11), height=28,
-        ),
-    )])
-    n = len(matchup_rows)
-    fig.update_layout(margin=dict(l=0, r=0, t=4, b=0),
-                      height=max(180, 32 * n + 70))
-    return fig
-
 
 def build_radar_chart(pa: str, pb: str, player_stats: dict, h2h_rate_fn) -> go.Figure:
     extractors = {
@@ -782,28 +733,6 @@ with tab_engine:
             "Click **▶ Run Simulation** in the sidebar to launch Monte Carlo analysis."
         )
 
-        if roster and not r32_matchups.empty:
-            # Compute first-round win probabilities (fast — no MC)
-            pre_rows = []
-            for _, mrow in r32_matchups.iterrows():
-                p = predict_match(
-                    mrow["player_a"], mrow["player_b"], "first round",
-                    player_stats, h2h_rate_fn, h2h_last_fn,
-                    scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
-                )
-                pre_rows.append({
-                    "Player A": mrow["player_a"],
-                    "p_a_wins": p,
-                    "Player B": mrow["player_b"],
-                })
-            st.plotly_chart(
-                render_first_round_bracket(pre_rows),
-                use_container_width=True,
-            )
-            st.caption(
-                "🟢 Green = model favourite  ·  🟡 Yellow = near 50/50  ·  "
-                "Pair shading shows which players meet in round 2"
-            )
 
 
 # ── Tab 2: Matchup Analyzer ────────────────────────────────────────
