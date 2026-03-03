@@ -552,6 +552,56 @@ def get_all_tournaments() -> pd.DataFrame:
     return cfg[["tournament_name", "tier", "start_date", "host_country"]].reset_index(drop=True)
 
 
+@st.cache_data(show_spinner=False)
+def _get_cached_tournament_state(tour_date: str, tier: int):
+    """Cache r32 matchups + player stats per (tour_date, tier)."""
+    _, _, _df = load_resources()
+    return build_time_zero_state(_df, tour_date, tier)
+
+
+@st.cache_data(show_spinner=False)
+def _get_h2h_hist(tour_date: str) -> pd.DataFrame:
+    """Cache the pre-tournament historical slice used for all H2H lookups."""
+    _, _, _df = load_resources()
+    hist = _df[_df["start_date"] < pd.Timestamp(tour_date)].copy()
+    return hist.sort_values("start_date").reset_index(drop=True)
+
+
+def _make_h2h_fns(hist: pd.DataFrame):
+    """Build H2H closure functions over a pre-filtered historical slice."""
+    rate_cache: dict = {}
+    last_cache: dict = {}
+
+    def h2h_rate(pa, pb):
+        key = (pa, pb)
+        if key not in rate_cache:
+            rows_a = hist[(hist["player_a"] == pa) & (hist["player_b"] == pb)]
+            rows_b = hist[(hist["player_a"] == pb) & (hist["player_b"] == pa)]
+            wins  = rows_a["player_a_won"].sum() + (1 - rows_b["player_a_won"]).sum()
+            total = len(rows_a) + len(rows_b)
+            rate_cache[key] = float(wins / total) if total > 0 else 0.5
+        return rate_cache[key]
+
+    def h2h_last(pa, pb):
+        key = (pa, pb)
+        if key not in last_cache:
+            meetings = hist[
+                ((hist["player_a"] == pa) & (hist["player_b"] == pb)) |
+                ((hist["player_a"] == pb) & (hist["player_b"] == pa))
+            ].sort_values("start_date")
+            if meetings.empty:
+                last_cache[key] = 0.5
+            else:
+                lr = meetings.iloc[-1]
+                last_cache[key] = (
+                    float(lr["player_a_won"]) if lr["player_a"] == pa
+                    else float(1 - lr["player_a_won"])
+                )
+        return last_cache[key]
+
+    return h2h_rate, h2h_last
+
+
 # ------------------------------------------------------------------
 # App bootstrap
 # ------------------------------------------------------------------
@@ -702,8 +752,8 @@ player_to_id = preprocessors["player_to_id"]
 tier_to_id   = preprocessors["tier_to_id"]
 round_to_id  = preprocessors["round_to_id"]
 
-r32_matchups, player_stats = build_time_zero_state(df, tour_date, tier)
-h2h_rate_fn, h2h_last_fn  = build_h2h_lookups(df, tour_date)
+r32_matchups, player_stats = _get_cached_tournament_state(tour_date, tier)
+h2h_rate_fn, h2h_last_fn  = _make_h2h_fns(_get_h2h_hist(tour_date))
 roster = sorted(player_stats.keys())
 
 # ------------------------------------------------------------------
@@ -724,16 +774,25 @@ with tab_engine:
         )
 
     elif run_btn:
-        # Setup info — collapses immediately so progress is unobstructed
+        # Setup info — stays expanded until simulation starts
         with st.status("🔬 Point-in-Time Engine", expanded=True) as sim_status:
-            st.write(f"📅 **{selected}** — data cut-off at `{tour_date}`")
+            st.write(f"📅 **{selected}** — data cut-off `{tour_date}`")
             st.write(
-                f"👥 Roster: **{len(player_stats)}** players  ·  "
-                f"**{len(r32_matchups)}** first-round matchups"
+                f"**1 / 4** &nbsp;✅&nbsp; Historical data sliced to `{tour_date}`"
+            )
+            st.write(
+                f"**2 / 4** &nbsp;✅&nbsp; Bracket state ready — "
+                f"**{len(player_stats)} players** · **{len(r32_matchups)} first-round matchups**"
+            )
+            st.write(
+                f"**3 / 4** &nbsp;✅&nbsp; H2H records computed"
             )
             actual_winner = get_actual_winner(df, tour_date)
             if actual_winner:
                 st.write(f"📋 Actual winner on record: **{format_name(actual_winner)}**")
+            st.write(
+                f"**4 / 4** &nbsp;🎲&nbsp; Launching **{n_sims:,}** Monte Carlo simulations…"
+            )
             sim_status.update(label=f"Simulating {selected}…",
                               state="running", expanded=False)
 
