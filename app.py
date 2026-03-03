@@ -630,6 +630,7 @@ with tab_engine:
         )
 
     elif run_btn:
+        # Setup info — collapses immediately so progress is unobstructed
         with st.status("🔬 Point-in-Time Engine", expanded=True) as sim_status:
             st.write(f"📅 **{selected}** — data cut-off at `{tour_date}`")
             st.write(
@@ -639,101 +640,100 @@ with tab_engine:
             actual_winner = get_actual_winner(df, tour_date)
             if actual_winner:
                 st.write(f"📋 Actual winner on record: **{format_name(actual_winner)}**")
-            st.write(f"🎲 Launching **{n_sims:,}** Monte Carlo iterations…")
             sim_status.update(label=f"Simulating {selected}…",
                               state="running", expanded=False)
 
-            # ── Live ticker ─────────────────────────────────────
-            progress_ph = st.progress(0, text="Starting…")
-            status_ph   = st.empty()
-            ticker_ph   = st.empty()
-            win_counts: dict[str, int] = {}
-            rng = np.random.default_rng(42)
-            t0  = time.time()
+        # ── Live progress — outside status so it's always visible ──
+        progress_ph = st.progress(0, text="Starting…")
+        status_ph   = st.empty()
+        ticker_ph   = st.empty()
+        win_counts: dict[str, int] = {}
+        rng = np.random.default_rng(42)
+        t0  = time.time()
 
-            for i in range(n_sims):
-                champion = simulate_bracket(
-                    r32_matchups, player_stats,
-                    h2h_rate_fn, h2h_last_fn,
-                    scaler, player_to_id, tier_to_id, round_to_id,
-                    model_payload, rng, tier,
-                )
-                win_counts[champion] = win_counts.get(champion, 0) + 1
-
-                if (i + 1) % 500 == 0 or (i + 1) == n_sims:
-                    n_done   = i + 1
-                    elapsed  = time.time() - t0
-                    rate     = n_done / elapsed if elapsed > 0 else 1
-                    eta      = (n_sims - n_done) / rate
-                    pct      = n_done / n_sims
-                    leader   = max(win_counts, key=win_counts.get)
-                    lead_pct = win_counts[leader] / n_done * 100
-
-                    progress_ph.progress(
-                        pct,
-                        text=f"**{n_done:,} / {n_sims:,}** sims "
-                             f"({pct*100:.0f}%)  ·  "
-                             f"{rate:.0f} sims/s  ·  "
-                             f"ETA {eta:.0f}s",
-                    )
-                    status_ph.markdown(
-                        f"🏆 **Leader:** {format_name(leader)} — "
-                        f"**{lead_pct:.1f}%** championship probability"
-                    )
-                    lb_live = (
-                        pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
-                        .sort_values("Wins", ascending=False).head(10)
-                        .reset_index(drop=True)
-                    )
-                    lb_live["Win %"]  = (lb_live["Wins"] / n_done * 100).round(1)
-                    lb_live["Player"] = lb_live["Player"].apply(format_name)
-                    ticker_ph.dataframe(
-                        lb_live[["Player", "Win %"]].style.format({"Win %": "{:.1f}%"}),
-                        use_container_width=True, hide_index=True,
-                    )
-
-            elapsed = time.time() - t0
-
-            # ── Build final results ──────────────────────────────
-            leaderboard = (
-                pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
-                .sort_values("Wins", ascending=False).reset_index(drop=True)
+        for i in range(n_sims):
+            champion = simulate_bracket(
+                r32_matchups, player_stats,
+                h2h_rate_fn, h2h_last_fn,
+                scaler, player_to_id, tier_to_id, round_to_id,
+                model_payload, rng, tier,
             )
-            leaderboard["Win %"] = (leaderboard["Wins"] / n_sims * 100).round(2)
-            if actual_winner:
-                leaderboard["Actual Result"] = leaderboard["Player"].apply(
-                    lambda p: "🥇 Winner" if p == actual_winner else ""
+            win_counts[champion] = win_counts.get(champion, 0) + 1
+
+            if (i + 1) % 500 == 0 or (i + 1) == n_sims:
+                n_done   = i + 1
+                elapsed  = time.time() - t0
+                rate     = n_done / elapsed if elapsed > 0 else 1
+                eta      = (n_sims - n_done) / rate
+                pct      = n_done / n_sims
+                leader   = max(win_counts, key=win_counts.get)
+                lead_pct = win_counts[leader] / n_done * 100
+
+                progress_ph.progress(
+                    pct,
+                    text=f"**{n_done:,} / {n_sims:,}** sims "
+                         f"({pct*100:.0f}%)  ·  "
+                         f"{rate:.0f} sims/s  ·  "
+                         f"ETA {eta:.0f}s",
+                )
+                status_ph.markdown(
+                    f"🏆 **Leader:** {format_name(leader)} — "
+                    f"**{lead_pct:.1f}%** championship probability"
+                )
+                lb_live = (
+                    pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
+                    .sort_values("Wins", ascending=False).head(10)
+                    .reset_index(drop=True)
+                )
+                lb_live["Win %"]  = (lb_live["Wins"] / n_done * 100).round(1)
+                lb_live["Player"] = lb_live["Player"].apply(format_name)
+                ticker_ph.dataframe(
+                    lb_live[["Player", "Win %"]].style.format({"Win %": "{:.1f}%"}),
+                    use_container_width=True, hide_index=True,
                 )
 
-            bracket_rows = []
-            for _, row in r32_matchups.iterrows():
-                p = predict_match(
-                    row["player_a"], row["player_b"], "first round",
-                    player_stats, h2h_rate_fn, h2h_last_fn,
-                    scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
-                )
-                bracket_rows.append({
-                    "Player A": row["player_a"], "Player B": row["player_b"],
-                    "P(A wins)": round(p, 3),
-                })
-            bracket_df = pd.DataFrame(bracket_rows)
+        elapsed = time.time() - t0
 
-            round_winners = compute_likely_bracket(
-                r32_matchups, player_stats, h2h_rate_fn, h2h_last_fn,
+        # ── Build final results ──────────────────────────────────
+        leaderboard = (
+            pd.DataFrame(win_counts.items(), columns=["Player", "Wins"])
+            .sort_values("Wins", ascending=False).reset_index(drop=True)
+        )
+        leaderboard["Win %"] = (leaderboard["Wins"] / n_sims * 100).round(2)
+        if actual_winner:
+            leaderboard["Actual Result"] = leaderboard["Player"].apply(
+                lambda p: "🥇 Winner" if p == actual_winner else ""
+            )
+
+        bracket_rows = []
+        for _, row in r32_matchups.iterrows():
+            p = predict_match(
+                row["player_a"], row["player_b"], "first round",
+                player_stats, h2h_rate_fn, h2h_last_fn,
                 scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
             )
+            bracket_rows.append({
+                "Player A": row["player_a"], "Player B": row["player_b"],
+                "P(A wins)": round(p, 3),
+            })
+        bracket_df = pd.DataFrame(bracket_rows)
 
-            st.session_state["sim_results"][sim_key] = {
-                "bracket_df":    bracket_df,
-                "leaderboard":   leaderboard,
-                "round_winners": round_winners,
-                "actual_winner": actual_winner,
-                "elapsed":       elapsed,
-            }
-            sim_status.update(
-                label=f"✅ {n_sims:,} sims complete — {elapsed:.1f}s",
-                state="complete", expanded=False,
-            )
+        round_winners = compute_likely_bracket(
+            r32_matchups, player_stats, h2h_rate_fn, h2h_last_fn,
+            scaler, player_to_id, tier_to_id, round_to_id, model_payload, tier,
+        )
+
+        st.session_state["sim_results"][sim_key] = {
+            "bracket_df":    bracket_df,
+            "leaderboard":   leaderboard,
+            "round_winners": round_winners,
+            "actual_winner": actual_winner,
+            "elapsed":       elapsed,
+        }
+        sim_status.update(
+            label=f"✅ {n_sims:,} sims complete — {elapsed:.1f}s",
+            state="complete", expanded=False,
+        )
         st.rerun()
 
     elif sim_key in st.session_state["sim_results"]:
