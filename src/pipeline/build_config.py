@@ -45,9 +45,16 @@ def parse_start_date(date_text: str, year: int) -> str | None:
       '7–12 January'  → day-first   (World Tour 2018+)
       'January 18'    → month-first  (Super Series 2010-2017)
     """
-    text = re.sub(r"[–, −]", "-", date_text.strip())
+    # Fold the non-breaking space to a plain one FIRST, and keep a space out of
+    # the dash class below. Wikipedia used to write these cells "7–12&nbsp;January",
+    # where the nbsp survived the sub and \s* absorbed it; it now serves a plain
+    # U+0020, which the class rewrote to "-" - "7-12-January" matches neither
+    # pattern. Every year of both eras then scraped zero tournaments while
+    # build_config still exited 0, so CI stayed green for five weeks on a
+    # calendar frozen at 2026-07-28.
+    text = re.sub(r"[–−—,]", "-", date_text.replace("\xa0", " ").strip())
     # Day-first: "18 January" or "18-23 January"
-    m = re.match(r"(\d+)\s*(?:-\s*\d+\s*)?([A-Za-z]+)", text)
+    m = re.match(r"(\d+)\s*(?:-\s*\d+\s*)?\s*([A-Za-z]+)", text)
     if m:
         day = int(m.group(1))
         month = MONTH_MAP.get(m.group(2).lower())
@@ -352,8 +359,14 @@ def build_config(output_path: str = OUTPUT_PATH) -> pd.DataFrame:
         time.sleep(2)
 
     if not all_rows:
-        print("ERROR: No tournaments found.")
-        return pd.DataFrame()
+        # A total failure has to be loud. Returning an empty frame here left the
+        # existing config untouched and exited 0, so the workflow's "Rebuild
+        # tournament calendar" step passed, `git diff -- data/` saw nothing, and
+        # the scrape, retrain and commit all skipped without anything going red.
+        # The 5% shrink guard below cannot catch this - it only ever runs when
+        # the scrape returned *something*.
+        print("ERROR: No tournaments found - refusing to continue.")
+        raise SystemExit(1)
 
     df = (
         pd.DataFrame(all_rows)
