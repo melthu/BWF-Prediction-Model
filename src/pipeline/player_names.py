@@ -103,6 +103,8 @@ ALIASES = {
     "Chan Jie Ying": "Jie Ying Chan",
     "Nguyễn Hai Dang": "Nguyen Hai Dang",
     "Kho Henrikho Wibowo": "Henrikho Kho Wibowo",
+    "Henrikho Wibowo Kho": "Henrikho Kho Wibowo",
+    "Joel Koh": "Joel Koh Jia Wei",
     "Ryan Ng Zin Rei": "Ryan Ng",
     "K. Ajay Kumar": "Ajay Kumar K.",
     "Hsieh Yu-Hsin": "Hsieh Yu-hsin",
@@ -124,6 +126,11 @@ ALIASES = {
     "Lê Đức Phát": "Le Duc Phat",
     "Nguyễn Hoàng Nam": "Nguyen Hoang Nam",
     "Nguyễn Hải Đăng": "Nguyen Hai Dang",
+    # Same name again, but the 2026 Vietnam Open page spells the D as U+00D0
+    # ETH rather than U+0110 D-WITH-STROKE. The two are visually identical and
+    # fold_ascii maps both to "D", but ALIASES is an exact dict lookup, so the
+    # line above did not match and the player split in two all over again.
+    "Nguyễn Hải Ðăng": "Nguyen Hai Dang",
     "Nguyễn Thu Thảo": "Nguyen Thu Thao",
     "Nguyễn Tiến Tuấn": "Nguyen Tien Tuan",
     "Nguyễn Văn Mai": "Nguyen Van Mai",
