@@ -73,13 +73,51 @@ def tournament(cfg, df):
 
 
 @pytest.fixture(scope="session")
+def bye_draw(cfg, df):
+    """
+    A completed tournament whose opening round feeds only part of the next one.
+
+    Super 100 and 300 draws run a preliminary round that some of the field
+    skips, so a 16-match opener is followed by a 16-match round of 32 rather
+    than an 8-match round of 16. The `tournament` fixture above screens these
+    out - it wants exactly 31 matches - which is precisely why the bracket bug
+    they carry survived: 30 tournaments in the corpus have this shape and the
+    suite had never simulated one.
+    """
+    from src.serving.export_static import dedupe_day
+
+    completed = df[df["is_pending"] == 0]
+    for _, row in cfg.sort_values("start_date", ascending=False).iterrows():
+        date = pd.Timestamp(row["start_date"])
+        day = dedupe_day(completed[(completed["start_date"] == date)
+                                   & (completed["tournament"] == row["tournament_name"])])
+        if day.empty or "round" not in day.columns:
+            continue
+        n1 = (day["round"] == "first round").sum()
+        n2 = (day["round"] == "second round").sum()
+        if n1 and n2 > -(-n1 // 2) and (day["round"] == "final").sum() == 1:
+            return row, day
+    pytest.skip("no completed tournament with a preliminary round found")
+
+
+@pytest.fixture(scope="session")
+def fitted_bye(df, raw, bye_draw):
+    """A point-in-time model and preprocessors for the `bye_draw` tournament."""
+    return _fit_for(df, raw, bye_draw)
+
+
+@pytest.fixture(scope="session")
 def fitted(df, raw, tournament):
     """A point-in-time model and its paired preprocessors for `tournament`."""
+    return _fit_for(df, raw, tournament)
+
+
+def _fit_for(df, raw, pair):
     from src.modeling.pit_model import train_point_in_time
     from src.serving.export_static import load_nat_map
     from src.serving.simulate import build_h2h_lookups, build_time_zero_state
 
-    cfg_row, day = tournament
+    cfg_row, day = pair
     date_key = pd.Timestamp(cfg_row["start_date"]).strftime("%Y-%m-%d")
     tier = int(cfg_row["tier"])
 

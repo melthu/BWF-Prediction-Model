@@ -22,6 +22,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(
 
 import argparse
 import pickle
+import re
 
 import numpy as np
 import pandas as pd
@@ -41,6 +42,20 @@ ROUND_ORDER = ["first round", "second round", "third round",
                "quarter-finals", "semi-finals", "final"]
 
 
+def ladder_names(n_rounds: int) -> list[str]:
+    """Name a knockout ladder of the given length.
+
+    The last three rounds are always the quarter-final, semi-final and final;
+    anything earlier is named by its position. Kept separate from
+    `round_sequence` because a draw with a preliminary round has a ladder one
+    longer than its opening round implies - see `build_bracket`.
+    """
+    n_rounds = max(1, n_rounds)
+    if n_rounds <= 3:
+        return ROUND_ORDER[-n_rounds:]
+    return ROUND_ORDER[:n_rounds - 3] + ROUND_ORDER[-3:]
+
+
 def round_sequence(n_first_round_matches: int) -> list[str]:
     """Round names for a knockout bracket that opens with the given number of
     first-round matches. 16 matches → 5 rounds, 32 matches → 6 rounds, etc.
@@ -49,10 +64,111 @@ def round_sequence(n_first_round_matches: int) -> list[str]:
     say) leaves e.g. 15 openers, and truncating there returns one round too
     few - the bracket then never resolves to a single winner.
     """
-    n_rounds = max(1, int(np.ceil(np.log2(max(1, n_first_round_matches)))) + 1)
-    if n_rounds <= 3:
-        return ROUND_ORDER[-n_rounds:]
-    return ROUND_ORDER[:n_rounds - 3] + ROUND_ORDER[-3:]
+    return ladder_names(int(np.ceil(np.log2(max(1, n_first_round_matches)))) + 1)
+
+
+def is_placeholder(name: str) -> bool:
+    """
+    An unfilled draw slot ("TBD (Q1)", "Qualifier 3"), not a person.
+
+    These reach the model with default Elo and everything else, so nothing
+    downstream refuses them - they simply get predicted like anyone else. Kept
+    in the bracket, because the pairing depends on the slot existing; excluded
+    anywhere a name is presented as a player. The frontend applies the same
+    rule when it renders a match.
+
+    Lives here rather than in the exporter because `build_bracket` needs it to
+    tell an unfilled feeder slot from a player entering the draw late.
+    """
+    return bool(re.search(r"\bTBD\b|qualifier", str(name), re.IGNORECASE))
+
+def _feeder_plan(prev: list, nxt: list) -> list:
+    """Slot list for a round fed by a preliminary round.
+
+    Each of `nxt`'s two-per-match slots is either the winner of one of `prev`'s
+    matches or a player entering the draw here. A slot naming someone who
+    played in `prev` is that match's winner's slot; the rest of the feeders are
+    still unplayed, so they show as unfilled slots and pair off against the
+    leftover matches in bracket order - which is the order both lists arrive
+    in, because the scraper emits cells by (column, row).
+    """
+    unclaimed = list(range(len(prev)))
+    by_player = {}
+    for j, (a, b) in enumerate(prev):
+        by_player.setdefault(a, j)
+        by_player.setdefault(b, j)
+
+    slots, deferred = [], []
+    for a, b in nxt:
+        for name in (a, b):
+            j = by_player.get(name)
+            if j is not None and j in unclaimed:
+                unclaimed.remove(j)
+                slots.append(("w", j))
+                continue
+            if is_placeholder(name):
+                deferred.append(len(slots))
+            slots.append(("p", name))
+
+    for pos, j in zip(deferred, unclaimed):
+        slots[pos] = ("w", j)
+    return slots
+
+
+def build_bracket(day: pd.DataFrame):
+    """
+    The draw's true round ladder, and how each round's slots are filled.
+
+    A knockout bracket normally halves - round k's winners are round k+1's
+    entrants, paired in order - which is what the slot arithmetic in
+    `run_monte_carlo` assumes by default. Super 100 and 300 draws break it.
+    They open with a preliminary round only part of the field plays, and the
+    seeds enter one round later, so 16 opening matches are followed by a
+    16-match round of 32 rather than an 8-match round of 16.
+
+    Halving from the opening round then gets the draw wrong twice: it drops a
+    round off the ladder, and it deals every direct entrant out of the
+    tournament altogether. Vietnam Open 2026 shipped a title race over its 32
+    preliminary players with Lee Zii Jia - the highest-ranked man in the draw -
+    absent, and a finished Guwahati Masters 2025 conditioned on its own results
+    returned the real champion 5% of the time instead of 100%.
+
+    Returns (rounds, plan). `rounds` is the ladder: the rounds Wikipedia has
+    published, then halving on from the last of them. `plan[round]` appears
+    only where a round is fed by something other than a straight halving, and
+    is that round's slot list - each entry ("w", j) for the winner of match j
+    of the previous round, or ("p", name) for a player entering here.
+    """
+    if day.empty or "round" not in day.columns:
+        return [], {}
+    present = [r for r in ROUND_ORDER if (day["round"] == r).any()]
+    if not present:
+        return [], {}
+
+    matches = {
+        r: [(row["player_a"], row["player_b"])
+            for _, row in day[day["round"] == r].iterrows()]
+        for r in present
+    }
+
+    plan = {}
+    for prev, nxt in zip(present, present[1:]):
+        n_prev, n_next = len(matches[prev]), len(matches[nxt])
+        # A normal round halves. It may round up - an odd opener leaves a bye,
+        # which the engine already carries - so only a round *bigger* than that
+        # is being fed from somewhere other than the round before it.
+        if n_next <= -(-n_prev // 2):
+            continue
+        plan[nxt] = _feeder_plan(matches[prev], matches[nxt])
+
+    # Rounds not published yet halve on from the last one that is.
+    n_last = len(matches[present[-1]])
+    remaining = int(np.ceil(np.log2(max(1, n_last))))
+    # The published names are authoritative - they came off the page - so keep
+    # them and take only the tail from the derived ladder.
+    tail = ladder_names(len(present) + remaining)[len(present):]
+    return present + tail, plan
+
 
 # Order of the per-player slice of CONT_COLS held in the `static` matrix
 STAT_KEYS = ["is_home", "matches_14d", "days_since", "recent_win_rate",
@@ -296,7 +412,7 @@ def run_monte_carlo(
     scaler, player_to_id, tier_to_id, round_to_id,
     model_payload, rng, tier=None,
     nat_map=None, fixed_results=None, progress_cb=None,
-    return_rounds=False, known_probs=None,
+    return_rounds=False, known_probs=None, bracket=None,
 ):
     """
     Vectorised Monte Carlo over n_sims brackets.
@@ -359,7 +475,14 @@ def run_monte_carlo(
     current = np.tile(np.array(slots, dtype=np.int64), (n_sims, 1))
 
     tier_id = tier_to_id.get(t, 0)
-    rounds = round_sequence(len(r1_matchups))
+    # `bracket` carries the ladder read off the page plus, for any round fed by
+    # something other than a straight halving, that round's slot list. Without
+    # it the ladder is derived by halving from the opening round, which is right
+    # for a draw where everybody enters in round one - see build_bracket.
+    if bracket is not None and bracket[0]:
+        rounds, slot_plan = bracket
+    else:
+        rounds, slot_plan = round_sequence(len(r1_matchups)), {}
     n_rounds_total = len(rounds)
 
     # None until a round actually reduces the bracket to one slot. Seeding this
@@ -467,9 +590,33 @@ def run_monte_carlo(
         W[sim_idx, winners] = np.maximum(str_w, 0.0) + 1.0
         W[sim_idx, losers]  = np.minimum(str_l, 0.0) - 1.0
 
-        current = winners.reshape(n_sims, n_matches)
-        if carry is not None:
-            current = np.column_stack([current, carry])
+        won = winners.reshape(n_sims, n_matches)
+        nxt = rounds[round_i + 1] if round_i + 1 < len(rounds) else None
+        slots_next = slot_plan.get(nxt) if nxt else None
+        if slots_next is None:
+            current = won
+            if carry is not None:
+                current = np.column_stack([current, carry])
+        else:
+            # This round feeds only part of the next one; its other slots hold
+            # players entering the draw here. Assemble the next round from the
+            # published pairing instead of from this round's winners alone -
+            # halving would drop those entrants out of the tournament.
+            cols = []
+            for kind, val in slots_next:
+                if kind == "w":
+                    if not 0 <= val < n_matches:
+                        raise ValueError(
+                            f"{nxt} is fed by match {val} of {round_name}, "
+                            f"which only has {n_matches}")
+                    cols.append(won[:, val])
+                else:
+                    seat = pidx.get(val)
+                    if seat is None:
+                        raise ValueError(
+                            f"{nxt} names {val!r}, who has no state in this draw")
+                    cols.append(np.full(n_sims, seat, dtype=np.int64))
+            current = np.column_stack(cols)
         if progress_cb:
             progress_cb(round_name, round_i + 1, n_rounds_total)
         if current.shape[1] == 1:

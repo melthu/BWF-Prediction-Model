@@ -39,9 +39,11 @@ from src.pipeline.player_names import fold_ascii
 from src.modeling.pit_model import train_point_in_time
 from src.serving.simulate import (
     ROUND_ORDER,
+    build_bracket,
     build_fixed_results,
     build_h2h_lookups,
     build_time_zero_state,
+    is_placeholder,
     load_model,
     predict_match,
     run_monte_carlo,
@@ -64,7 +66,7 @@ STALE_AFTER_DAYS = 21
 
 # Bump when the payload shape or any exported computation changes, so a
 # rerun regenerates files that would otherwise look up to date.
-EXPORT_VERSION = 9
+EXPORT_VERSION = 10
 
 FEATURE_NAMES = ["tier", "round", "player_a", "player_b"] + CONT_COLS
 
@@ -94,19 +96,6 @@ DRIVER_OF = {f: d for d, fs in _DRIVERS.items() for f in fs}
 # ----------------------------------------------------------------------
 # helpers
 # ----------------------------------------------------------------------
-def is_placeholder(name: str) -> bool:
-    """
-    An unfilled draw slot ("TBD (Q1)", "Qualifier 3"), not a person.
-
-    These reach the model with default Elo and everything else, so nothing
-    downstream refuses them - they simply get predicted like anyone else. Kept
-    in the bracket, because the pairing depends on the slot existing; excluded
-    anywhere a name is presented as a player. The frontend applies the same
-    rule when it renders a match.
-    """
-    return bool(re.search(r"\bTBD\b|qualifier", str(name), re.IGNORECASE))
-
-
 def derive_status(n_played: int, n_pending: int, tour_date) -> str:
     """
     Where a tournament is in its life, from its own rows.
@@ -300,7 +289,7 @@ def export_tournament(cfg_row, df, raw, nat_map, fallback_payload, out_dir):
                 scaler, p2i, t2i, r2i, payload,
                 np.random.default_rng(42), tier=tier,
                 nat_map=nat_map, fixed_results=fixed, return_rounds=True,
-                known_probs=known)
+                known_probs=known, bracket=build_bracket(day))
         except ValueError as e:
             print(f"    no simulation for {date_key}: {e}")
             return None

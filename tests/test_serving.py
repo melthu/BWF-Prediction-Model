@@ -156,6 +156,81 @@ def test_fixed_results_override_the_model(fitted):
     )
 
 
+def test_a_preliminary_round_does_not_swallow_the_draw(bye_draw):
+    """
+    build_bracket must find the extra round and account for every slot.
+
+    A draw with a preliminary round runs 16 -> 16 -> 8 -> 4 -> 2 -> 1, not the
+    16 -> 8 -> 4 -> 2 -> 1 that halving from the opener gives. Getting it wrong
+    drops a round *and* deals out everyone who entered after round one.
+    """
+    from src.serving.simulate import build_bracket, round_sequence
+
+    _, day = bye_draw
+    rounds, plan = build_bracket(day)
+
+    n1 = int((day["round"] == "first round").sum())
+    assert len(rounds) == len(round_sequence(n1)) + 1, (
+        f"a fed round adds a rung: got {rounds}")
+    assert rounds[-3:] == ["quarter-finals", "semi-finals", "final"]
+    assert "second round" in plan, "the round after the opener is the fed one"
+
+    slots = plan["second round"]
+    assert len(slots) == 2 * int((day["round"] == "second round").sum())
+    fed = [j for kind, j in slots if kind == "w"]
+    assert sorted(fed) == list(range(n1)), (
+        "every opening match must feed exactly one slot, none twice")
+    entering = [v for kind, v in slots if kind == "p"]
+    assert len(entering) == len(slots) - n1
+    assert len(set(entering)) == len(entering), "a player cannot hold two slots"
+
+
+def test_a_bye_draw_conditioned_on_its_results_returns_its_real_champion(fitted_bye,
+                                                                        bye_draw):
+    """
+    The same invariant as test_fixed_results_override_the_model, on the draw
+    shape that used to break it.
+
+    Before build_bracket this failed loudly on real data: Guwahati Masters 2025
+    gave its actual champion 109 sims in 2000, Odisha Masters 2025 gave its
+    champion none at all, because the direct entrants were never dealt into the
+    bracket and the fixed results were being matched against the wrong rounds.
+    """
+    from src.serving.simulate import build_bracket
+
+    f = fitted_bye
+    _, day = bye_draw
+    counts = run_monte_carlo(
+        SIMS, f["r1"], f["stats"], f["h2h_rate"], f["h2h_last"],
+        f["pre"]["scaler"], f["pre"]["player_to_id"], f["pre"]["tier_to_id"],
+        f["pre"]["round_to_id"], f["payload"], np.random.default_rng(42),
+        tier=f["tier"], nat_map=f["nat_map"],
+        fixed_results=build_fixed_results(f["day"]),
+        bracket=build_bracket(day),
+    )
+    final = f["day"][f["day"]["round"] == ROUND_ORDER[-1]].iloc[0]
+    champion = final["player_a"] if final["player_a_won"] == 1 else final["player_b"]
+    assert counts.get(champion, 0) == SIMS, (
+        f"expected {champion} to win every conditioned simulation, got "
+        f"{sorted(counts.items(), key=lambda kv: -kv[1])[:5]}")
+
+
+def test_a_full_draw_bracket_is_unchanged(tournament):
+    """
+    build_bracket must be a no-op where the old halving was already right.
+
+    The fix is meant to reach 30 tournaments, not all 226 - if it moved a
+    normal draw it would rewrite every shard's numbers for no reason.
+    """
+    from src.serving.simulate import build_bracket, round_sequence
+
+    _, day = tournament
+    rounds, plan = build_bracket(day)
+    n1 = int((day["round"] == "first round").sum())
+    assert rounds == round_sequence(n1)
+    assert plan == {}, f"a full draw needs no slot plan, got {list(plan)}"
+
+
 def test_every_feature_maps_to_exactly_one_driver():
     """
     A feature added to CONT_COLS without a driver raises KeyError mid-export,
