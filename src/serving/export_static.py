@@ -312,7 +312,12 @@ def export_tournament(cfg_row, df, raw, nat_map, fallback_payload, out_dir):
         # the title in 10,000 runs - fine when the only column was title odds,
         # wrong once the row also carries how far they got. Akita Masters 2018
         # lost two of its sixteen second-round entrants that way.
-        entrants = [k for k in reached[rounds_seen[0]] if not is_placeholder(k)]
+        # ...and not just everyone in the *first* round, either. A draw with a
+        # preliminary round seats its direct entrants a round later, so keying
+        # the board off round one drops them: Akita Masters 2018 shipped a
+        # leaderboard summing to 0.15, missing all eighteen of them.
+        field = {k for r in rounds_seen for k in reached[r]}
+        entrants = [k for k in field if not is_placeholder(k)]
         board = sorted(
             ({"name": k, "nat": nat_map.get(k, ""),
               "p": round(counts.get(k, 0) / total, 4),

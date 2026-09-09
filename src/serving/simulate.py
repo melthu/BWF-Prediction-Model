@@ -151,23 +151,53 @@ def build_bracket(day: pd.DataFrame):
         for r in present
     }
 
+    # Keyed by position in the ladder, not by name: the name of a rung is not
+    # known until the ladder's length is, below.
     plan = {}
-    for prev, nxt in zip(present, present[1:]):
+    for i, (prev, nxt) in enumerate(zip(present, present[1:]), start=1):
         n_prev, n_next = len(matches[prev]), len(matches[nxt])
         # A normal round halves. It may round up - an odd opener leaves a bye,
         # which the engine already carries - so only a round *bigger* than that
-        # is being fed from somewhere other than the round before it.
-        if n_next <= -(-n_prev // 2):
+        # is being fed from somewhere other than the round before it. It must
+        # also be no smaller than the round it follows: a preliminary round
+        # never shrinks going into the main draw. A classic-era page does,
+        # because it repeats its semi-finals in both the half-bracket and the
+        # Finals table and dedupe can leave three of them - All England Super
+        # Series 2010 has exactly that, and without this it was read as a
+        # feeder and its bracket then never resolved.
+        if n_next <= -(-n_prev // 2) or n_next < n_prev:
             continue
-        plan[nxt] = _feeder_plan(matches[prev], matches[nxt])
+        plan[i] = _feeder_plan(matches[prev], matches[nxt])
 
-    # Rounds not published yet halve on from the last one that is.
-    n_last = len(matches[present[-1]])
-    remaining = int(np.ceil(np.log2(max(1, n_last))))
-    # The published names are authoritative - they came off the page - so keep
-    # them and take only the tail from the derived ladder.
-    tail = ladder_names(len(present) + remaining)[len(present):]
-    return present + tail, plan
+    # The ladder's length comes from the slot arithmetic rather than from how
+    # many rounds the page lists: a fed round adds a rung, a duplicated row must
+    # not add one, and the rounds after the last published one still have to be
+    # counted. Each round halves, rounding up because an odd slot count leaves
+    # a bye that the engine carries forward.
+    slots, n_rungs = 2 * len(matches[present[0]]), 1
+    while slots > 2 and n_rungs <= len(ROUND_ORDER) + 2:
+        slots = len(plan[n_rungs]) if n_rungs in plan else -(-slots // 2)
+        n_rungs += 1
+
+    # Name the ladder by its length, exactly as round_sequence always has. The
+    # published names are not used directly: a classic-era page can skip a round
+    # entirely (Malaysia Open Super Series 2010 lists a first round and then
+    # semi-finals), and splicing those onto a derived tail produces a ladder
+    # with a repeated rung. Where the page is well formed its names *are* this
+    # sequence, which `test_published_round_names_match_the_ladder` pins.
+    rounds = ladder_names(n_rungs)
+
+    # Only trust a slot plan when the page's own round names are the ladder's.
+    # A few classic-era pages never got their rounds canonicalised - All England
+    # Super Series Premier 2012 splits its opening round across "first round"
+    # and "first round[2]" and spells the rest "quarterfinals"/"semifinals" - so
+    # `present` has a hole in it, half the first round hides behind an
+    # unrecognised label, and the remaining half looks like a feeder into the
+    # second. Those draws were already simulated from a partial bracket; fall
+    # back to that rather than invent a different wrong answer for them.
+    if present != rounds[:len(present)]:
+        return rounds, {}
+    return rounds, {rounds[i]: v for i, v in plan.items() if i < len(rounds)}
 
 
 # Order of the per-player slice of CONT_COLS held in the `static` matrix

@@ -215,6 +215,36 @@ def test_a_bye_draw_conditioned_on_its_results_returns_its_real_champion(fitted_
         f"{sorted(counts.items(), key=lambda kv: -kv[1])[:5]}")
 
 
+def test_published_round_names_match_the_ladder(df):
+    """
+    Where a draw is fed, the names on the page must be the ladder's own.
+
+    build_bracket names rungs by ladder position rather than by what the page
+    called them, because a classic-era page can skip a round outright and
+    splicing its names onto a derived tail yields a ladder with a repeated rung.
+    That is only safe while the two agree on the draws that get a slot plan -
+    fixed_results and known_probs are keyed by the page's round name, so a
+    disagreement would silently stop a live event conditioning on its results.
+    """
+    from src.serving.export_static import dedupe_day
+    from src.serving.simulate import ROUND_ORDER, build_bracket
+
+    checked = 0
+    for name, g in df.groupby("tournament"):
+        day = dedupe_day(g)
+        if day.empty or "round" not in day.columns:
+            continue
+        rounds, plan = build_bracket(day)
+        if not plan:
+            continue
+        checked += 1
+        assert len(rounds) == len(set(rounds)), f"{name}: repeated rung in {rounds}"
+        present = [r for r in ROUND_ORDER if (day["round"] == r).any()]
+        assert present == rounds[:len(present)], (
+            f"{name}: page says {present}, ladder says {rounds}")
+    assert checked, "no fed draw in the corpus to check"
+
+
 def test_a_full_draw_bracket_is_unchanged(tournament):
     """
     build_bracket must be a no-op where the old halving was already right.
