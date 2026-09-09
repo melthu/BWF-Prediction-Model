@@ -138,6 +138,25 @@ def run_orchestrator(
     # without each having to remember to canonicalise.
     master = canonicalise(master)
 
+    # Canonicalising can *create* duplicates, so the de-dupe has to follow it.
+    # The scraper already drops a match repeated across a page's half-bracket
+    # and "Finals" tables, but it does that on the raw names - and a classic-era
+    # page can spell the same player two ways in those two tables, which is one
+    # pair to us and two pairs to the scraper. The 2013 World Championships
+    # writes "Jan Ø. Jørgensen" in one and "Jan O. Jorgensen" in the other, and
+    # shipped its quarter-final twice the moment those were aliased together.
+    # Prefer the row carrying a score, matching the scraper's own rule.
+    if {"tournament", "round", "player_a", "player_b"} <= set(master.columns):
+        pair = master.apply(
+            lambda r: (r["tournament"], r["round"],
+                       frozenset((r["player_a"], r["player_b"]))), axis=1)
+        scored = (master["score"].notna()
+                  & (master["score"].astype(str).str.strip() != "")).astype(int)
+        keep = (master.assign(_pair=pair, _scored=scored)
+                .sort_values("_scored", ascending=False, kind="stable")
+                .drop_duplicates("_pair", keep="first").index)
+        master = master.loc[sorted(keep)].reset_index(drop=True)
+
     master.to_csv(output_path, index=False)
 
     n_pending = int(master["is_pending"].sum()) if "is_pending" in master.columns else 0

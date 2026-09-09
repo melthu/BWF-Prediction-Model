@@ -126,11 +126,25 @@ ALIASES = {
     "Georges Paul": "Georges Julien Paul",
     "Julien Paul": "Georges Julien Paul",
 
+    # Two more full-name spellings, both confirmed on the player's own
+    # Wikipedia article rather than assumed: "Luis Montoya (badminton)" opens
+    # "Luis Armando Montoya Navarro is a Mexican badminton player", and
+    # "Vladimir Malkov (badminton)" opens "Vladimir Vadimovich Malkov is a
+    # Russian badminton player". Worth the check - unlike a dropped accent,
+    # a dropped name part is exactly how two different people collide.
+    "Luis Armando Montoya Navarro": "Luis Montoya",
+    "Vladimir Vadimovich Malkov": "Vladimir Malkov",
+
     # Vietnamese names are rendered without diacritics throughout, matching
     # BWF and the English Wikipedia. Folding "Nguyễn Hải Đăng" also reunites
     # it with the "Nguyen Hai Dang" spelling it had been split from.
     "Bùi Thành Đạt": "Bui Thanh Dat",
     "Lê Đức Phát": "Le Duc Phat",
+    # The World Championships pages accent these names only half-way -
+    # "Lê Đuc Phat" keeps the stroke on the D but drops the tone marks, and
+    # "Nguyen Hai Đang" keeps only the stroke. Neither matches the fully
+    # accented key above, so each arrived as a brand-new player.
+    "Lê Đuc Phat": "Le Duc Phat",
     "Nguyễn Hoàng Nam": "Nguyen Hoang Nam",
     "Nguyễn Hải Đăng": "Nguyen Hai Dang",
     # Same name again, but the 2026 Vietnam Open page spells the D as U+00D0
@@ -138,6 +152,7 @@ ALIASES = {
     # fold_ascii maps both to "D", but ALIASES is an exact dict lookup, so the
     # line above did not match and the player split in two all over again.
     "Nguyễn Hải Ðăng": "Nguyen Hai Dang",
+    "Nguyen Hai Đang": "Nguyen Hai Dang",
     "Nguyễn Thu Thảo": "Nguyen Thu Thao",
     "Nguyễn Tiến Tuấn": "Nguyen Tien Tuan",
     "Nguyễn Văn Mai": "Nguyen Van Mai",
@@ -149,7 +164,10 @@ ALIASES = {
 
     # Diacritic variants elsewhere fold toward the correct spelling, which
     # is also the majority one in each case.
+    "Adrian Dziolko": "Adrian Dziółko",
     "Ditlev Jaeger Holm": "Ditlev Jæger Holm",
+    "Jan O. Jorgensen": "Jan Ø. Jørgensen",
+    "Milan Ludik": "Milan Ludík",
     "Michal Rogalski": "Michał Rogalski",
     "Przemyslaw Wacha": "Przemysław Wacha",
 }

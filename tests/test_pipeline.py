@@ -137,3 +137,30 @@ def test_order_by_round_preserves_first_round_bracket_order(raw):
                          & (ordered["round"].str.lower().str.startswith("first"))
                          ].itertuples()]
         assert before == after, f"{name} {date:%Y-%m-%d}: first-round order changed"
+
+
+def test_bracket_rounds_covers_every_alias():
+    """
+    The scraper's whole-page mode keeps only rows whose round is a real rung of
+    a knockout ladder, and it matches on the header text as scraped - lowercased
+    but NOT canonicalised. So BRACKET_ROUNDS has to name every spelling that
+    ROUND_ALIASES would canonicalise into a rung, not just the six canonical
+    ones. Writing it in canonical names alone silently deleted all 48 quarter-
+    and semi-finals of the 2010-2019 World Championships, which spell them
+    "Quarterfinals"/"Semifinals"; the filter dropped them and the corpus simply
+    had no such matches. Nothing else would have noticed - the rows were never
+    wrong, they were absent.
+    """
+    from src.pipeline.feature_engineering import ROUND_ALIASES, ROUND_RANK
+    from src.pipeline.scraper_wiki_single import BRACKET_ROUNDS
+
+    missing = {
+        raw for raw, canon in ROUND_ALIASES.items()
+        if canon in ROUND_RANK and raw not in BRACKET_ROUNDS
+    }
+    assert not missing, (
+        "ROUND_ALIASES canonicalises these into ladder rungs, but the scraper's "
+        "whole-page filter would drop them: " + ", ".join(sorted(missing))
+    )
+    # ...and the canonical names themselves, which pages also use verbatim.
+    assert set(ROUND_RANK) <= set(BRACKET_ROUNDS)

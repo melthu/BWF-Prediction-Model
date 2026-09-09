@@ -14,11 +14,22 @@ _SCORE_CELL_RE = re.compile(r"^\d{1,2}\s*r?$", re.IGNORECASE)
 _SEED_CELL_RE = re.compile(r"^\d{1,2}$")
 
 
-# The rungs of a knockout ladder, as canonicalised by ROUND_ALIASES. Defined
-# here rather than imported from the serving layer, which the scraper must not
-# depend on.
+# The rungs of a knockout ladder, in every spelling Wikipedia writes them in.
+# Defined here rather than imported, so the scraper keeps depending on nothing
+# but its three third-party libraries; `test_bracket_rounds_covers_every_alias`
+# pins this set against ROUND_ALIASES so the two cannot drift apart.
+#
+# Both spellings, and not just the canonical six, because the scraper stores a
+# column's header text lowercased and does NOT canonicalise it - so a filter
+# written in canonical names quietly drops the classic-era rows. It did: the
+# 2010-2019 World Championships write "Quarterfinals"/"Semifinals" where the
+# modern pages write "Quarter-finals"/"Semi-finals", and the first version of
+# this filter deleted every quarter-final and semi-final from all eight.
 BRACKET_ROUNDS = ("first round", "second round", "third round",
-                  "quarter-finals", "semi-finals", "final")
+                  "quarter-finals", "semi-finals", "final",
+                  "1st round", "2nd round", "3rd round",
+                  "quarterfinals", "semifinals", "finals",
+                  "first round[2]")
 
 
 def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFrame:
