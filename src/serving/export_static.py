@@ -66,7 +66,7 @@ STALE_AFTER_DAYS = 21
 
 # Bump when the payload shape or any exported computation changes, so a
 # rerun regenerates files that would otherwise look up to date.
-EXPORT_VERSION = 10
+EXPORT_VERSION = 11
 
 FEATURE_NAMES = ["tier", "round", "player_a", "player_b"] + CONT_COLS
 

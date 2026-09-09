@@ -14,6 +14,13 @@ _SCORE_CELL_RE = re.compile(r"^\d{1,2}\s*r?$", re.IGNORECASE)
 _SEED_CELL_RE = re.compile(r"^\d{1,2}$")
 
 
+# The rungs of a knockout ladder, as canonicalised by ROUND_ALIASES. Defined
+# here rather than imported from the serving layer, which the scraper must not
+# depend on.
+BRACKET_ROUNDS = ("first round", "second round", "third round",
+                  "quarter-finals", "semi-finals", "final")
+
+
 def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFrame:
     """
     Scrapes Men's Singles match results from a BWF tournament Wikipedia page.
@@ -45,13 +52,27 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
                   "player_b", "player_b_nat", "player_a_won", "score",
                   "player_a_seed", "player_b_seed", "is_walkover", "is_pending"]
 
-    if ms_heading_div is None:
+    # A World Tour page carries all five disciplines, so the men's singles
+    # bracket has to be isolated by heading. The majors do not: the World
+    # Championships and the Olympics give men's singles a page of its own, whose
+    # every table is already the right draw and which therefore has no such
+    # heading. Recognise that page by its title rather than falling back
+    # whenever a heading is missing - on a five-discipline page that would
+    # quietly scrape the women's draw into the men's corpus.
+    page_title = soup.find("h1")
+    ms_only = bool(page_title and re.search(r"men.?s singles",
+                                            page_title.get_text(), re.IGNORECASE))
+
+    if ms_heading_div is None and not ms_only:
         print("ERROR: Could not find a 'Men's Singles' section header on this page.")
         return pd.DataFrame(columns=EMPTY_COLS)
 
     stop_pattern = re.compile(r"(women|doubles|mixed)", re.IGNORECASE)
     ms_tables = []
-    for sib in ms_heading_div.find_next_siblings():
+    if ms_heading_div is None:
+        # Whole page is the draw; there is no heading to walk out from.
+        ms_tables = soup.find_all("table")
+    for sib in (ms_heading_div.find_next_siblings() if ms_heading_div else []):
         if sib.name == "div" and "mw-heading2" in sib.get("class", []):
             if stop_pattern.search(sib.get_text()):
                 break
@@ -314,7 +335,19 @@ def scrape_wiki_single(url: str, tournament_name: str, tier: int) -> pd.DataFram
         if prev is None or m["score"] or not prev["score"]:
             deduped[key] = m
 
-    return pd.DataFrame(deduped.values())
+    out = pd.DataFrame(deduped.values())
+
+    # Whole-page mode took every table on the page, which on a majors draw also
+    # picks up the seeds list and the participating-nations table. Both parse
+    # into plausible-looking rows - the seeds table pairs players off with no
+    # score, the nations table yields "China vs Thailand" - so keep only rows
+    # whose round is a real rung of a knockout ladder. In section mode the
+    # heading already bounded the tables, and a page there may legitimately
+    # carry a qualifying round, so leave that path alone.
+    if ms_heading_div is None and not out.empty:
+        out = out[out["round"].isin(BRACKET_ROUNDS)].reset_index(drop=True)
+
+    return out
 
 
 if __name__ == "__main__":

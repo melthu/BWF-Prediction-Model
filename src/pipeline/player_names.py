@@ -104,6 +104,13 @@ ALIASES = {
     "Nguyễn Hai Dang": "Nguyen Hai Dang",
     "Kho Henrikho Wibowo": "Henrikho Kho Wibowo",
     "Henrikho Wibowo Kho": "Henrikho Kho Wibowo",
+    # Both found by the bracket rewiring in build_bracket, which could not
+    # match a draw slot to the player who had just won into it. Neither pair
+    # has ever met; each is one player under a dominant spelling and a rare one
+    # (25 matches vs 2, 19 vs 1), and each appears both ways inside a single
+    # draw - Hyderabad Open 2018 and Orleans Masters 2026 respectively.
+    "R. M. V. Gurusaidutt": "Gurusai Dutt",
+    "Dong Tian Yao": "Dong Tianyao",
     "Joel Koh": "Joel Koh Jia Wei",
     "Ryan Ng Zin Rei": "Ryan Ng",
     "K. Ajay Kumar": "Ajay Kumar K.",

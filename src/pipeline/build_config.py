@@ -341,6 +341,70 @@ def scrape_superseries_year(year: int) -> list[dict]:
     return tournaments
 
 
+def scrape_world_championships(year: int) -> list[dict]:
+    """
+    The BWF World Championships, which no calendar page carries.
+
+    `_scrape_calendar_page` only ever sees the World Tour and Super Series
+    calendars, and the Championships is on neither - it is not a tour stop and
+    has no "Level: Super NNN" line to be found by. It was therefore missing from
+    the corpus entirely, along with every other major, so the sport's biggest
+    title each year contributed nothing to anyone's Elo, form or head-to-head.
+
+    Men's singles has its own page, which `scrape_wiki_single` reads in whole-
+    page mode. Dates and host come off the parent page's infobox. Not held in
+    Olympic years; those pages 404 and are skipped.
+
+    Tier 1500, the same as the World Tour Finals - the top tier already in the
+    vocabulary. A new value would be an unseen category for every model fitted
+    before it, and the fitted Elo tier exponent is 0.06, so tier barely moves a
+    rating anyway.
+    """
+    parent = f"https://en.wikipedia.org/wiki/{year}_BWF_World_Championships"
+    try:
+        resp = requests.get(parent, headers=HEADERS, timeout=15)
+        if resp.status_code == 404:
+            print(f"  {year}: no World Championships page - skipping.")
+            return []
+        resp.raise_for_status()
+    except requests.RequestException as e:
+        print(f"  {year}: World Championships request failed - {e}")
+        return []
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    box = soup.find("table", class_=re.compile("infobox"))
+    if box is None:
+        print(f"  {year}: World Championships page has no infobox - skipping.")
+        return []
+
+    dates = host = None
+    for row in box.find_all("tr"):
+        th, td = row.find("th"), row.find("td")
+        if not (th and td):
+            continue
+        label = th.get_text(" ", strip=True).lower()
+        if "date" in label and dates is None:
+            dates = td.get_text(" ", strip=True)
+        elif "location" in label and host is None:
+            text = td.get_text(" ", strip=True)
+            host = text.split(",")[-1].strip() or None
+
+    start_date = parse_start_date(dates, year) if dates else None
+    if not start_date or not host:
+        print(f"  {year}: World Championships dates/host unreadable - skipping.")
+        return []
+
+    print(f"  {year}: World Championships on {start_date} in {host}.")
+    return [{
+        "url": (f"https://en.wikipedia.org/wiki/{year}_BWF_World_Championships"
+                f"_%E2%80%93_Men%27s_singles"),
+        "tournament_name": f"World Championships {year}",
+        "tier": 1500,
+        "start_date": start_date,
+        "host_country": host,
+    }]
+
+
 def build_config(output_path: str = OUTPUT_PATH) -> pd.DataFrame:
     all_rows = []
 
@@ -356,6 +420,12 @@ def build_config(output_path: str = OUTPUT_PATH) -> pd.DataFrame:
         print(f"Scraping {year} BWF World Tour...")
         rows = scrape_year(year)
         all_rows.extend(rows)
+        time.sleep(2)
+
+    # Majors, which appear on no calendar page.
+    for year in range(2010, WORLD_TOUR_LAST_YEAR + 1):
+        print(f"Checking {year} BWF World Championships...")
+        all_rows.extend(scrape_world_championships(year))
         time.sleep(2)
 
     if not all_rows:

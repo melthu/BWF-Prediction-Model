@@ -165,9 +165,32 @@ def build_bracket(day: pd.DataFrame):
         # Finals table and dedupe can leave three of them - All England Super
         # Series 2010 has exactly that, and without this it was read as a
         # feeder and its bracket then never resolved.
-        if n_next <= -(-n_prev // 2) or n_next < n_prev:
+        halved = -(-n_prev // 2)
+        slots = _feeder_plan(matches[prev], matches[nxt])
+        wired = sorted(j for kind, j in slots if kind == "w")
+        # Only trust a wiring that consumes every match of the previous round
+        # exactly once. Anything else means the page did not say enough to
+        # rewire this round, and the default order stands.
+        if wired != list(range(n_prev)):
             continue
-        plan[i] = _feeder_plan(matches[prev], matches[nxt])
+        if n_next >= n_prev:
+            # Fed: the next round is bigger than this one, so part of its field
+            # enters there. Its slot list is longer than a halving would give,
+            # which is what adds the extra rung to the ladder below.
+            plan[i] = slots
+        elif n_next == halved and 2 * n_next == n_prev:
+            # Same size as a halving, so the ladder is unaffected - but the page
+            # may still pair the winners in an order the default [::2] gets
+            # wrong. Akita Masters 2018 does: its round-2 rows are interleaved
+            # across the two halves of the draw, so the real third round pairs
+            # winner 0 with winner 2, not with winner 1. 15 finished draws have
+            # a round like this. Only record it when it actually differs, so
+            # the other 286 keep the exact numbers they already had.
+            if slots != [("w", j) for j in range(n_prev)]:
+                plan[i] = slots
+        # Otherwise the page is malformed for this pair - a classic-era table
+        # repeating its semi-finals leaves three of them against four
+        # quarter-finals - and gets the default.
 
     # The ladder's length comes from the slot arithmetic rather than from how
     # many rounds the page lists: a fed round adds a rung, a duplicated row must
